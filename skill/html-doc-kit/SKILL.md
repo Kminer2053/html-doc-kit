@@ -13,7 +13,7 @@ compatibility: Node 22 이상. 브라우저 시험에는 Chrome 또는 Edge를 �
 
 ## 새 문서
 
-1. 본문 파일을 씁니다(마크다운 권장). 표기법은 [references/input.md](references/input.md)에 있습니다.
+1. 본문 파일을 씁니다. **`.md`로 쓰세요.** HTML로 써야 하면 `.doc-kit/본문.html`처럼 `.doc-kit/` 안에 둡니다(작업 폴더에 둔 본문 HTML은 build 뒤 `.doc-kit/sources/`로 옮겨집니다). 표기법은 [references/input.md](references/input.md)에 있습니다.
 2. `doc-kit build 본문.md -o 결과.html` (장표면 `--type slide`, A4 고정이면 `--type a4`. 모르면 빼세요. `---`만 넣어서는 장표가 되지 않습니다)
 3. `doc-kit check 결과.html` 이 "완성"이어야 끝입니다.
 
@@ -40,6 +40,7 @@ compatibility: Node 22 이상. 브라우저 시험에는 Chrome 또는 Edge를 �
 - 차트는 스크립트로 그리지 말고 SVG나 표로 넣습니다. 본문의 스크립트는 빠집니다.
 - 그림은 로컬 파일 경로로 넣습니다. 파일 안에 들어갑니다.
 - `check`가 "미완성"이면 `doc-kit ensure 파일.html`을 실행합니다. 다른 방법으로 고치지 마세요.
+- `check`에 "브라우저 시험 미실행"이 나오면(샌드박스 등) 화면 판정을 못 한 것입니다. 사용자에게 그대로 알리고, 브라우저로 열어 내용이 보이는지 확인해 달라고 합니다.
 - 경고(넘침, 빈 쪽, 못 찾은 그림)는 내용 문제입니다. 고칠 수 있으면 고치고 사용자에게 알립니다.
 - 이미 있는 결과 파일에 다시 build하면 브라우저에서 고친 내용이 새 파일에 없습니다(백업은 남습니다). 키트 파일은 extract와 apply로 고칩니다.
 - `ensure`가 "알림"으로 새 이름의 파일을 알려 주면 그 내용을 사용자에게 전합니다.
