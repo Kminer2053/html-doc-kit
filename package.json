@@ -1,0 +1,19 @@
+{
+  "name": "html-doc-kit",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "HTML documents that always include a viewer and an editor",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "node tools/bundle.mjs",
+    "test": "node test/run.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "marked": "^18.1.3",
+    "parse5": "^8.1.0"
+  }
+}
