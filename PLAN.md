@@ -38,7 +38,7 @@
 | P1-7 | 그림 옮기기 | 편집기 기능 추가 | D6 범위. 칸 안 그림 끌기, 클릭과 구분, 배율 보정, 쪽 안으로 제한, 저장 후 유지, 되돌리기. 나중에 글자 상자도 쓸 수 있는 구조 | M |
 | P1-8 | 스킬 문서 | `SKILL.md`, `references/` | Agent Skills 규격 검사 통과. 명령 위주로 짧게. 금지 사항 포함(PRD 5.7) | S |
 | P1-9 | 설치·훅·점검 | `install`, `uninstall`, `doctor`, 세 에이전트 훅과 지침 | 한 명령으로 설치·제거, 기존 설정 보존. Node 절대 경로 기록. PRD 5.6 적용 범위와 A6 통과. Bash로 쓴 파일과 저장 위치 미지정 파일도 잡음. pre-commit 예시 문서 | L |
-| P1-10 | 낮은 모델 수용 시험 | 시험 결과표 | PRD A3 전 항목. 실패는 원인을 겹별로 분류해 고침 | M |
+| P1-10 | 끝(한계 있음) | Codex(훅 승인 뒤)·Claude Code는 11건 모두 통과. Cursor 앱은 통과. Cursor CLI는 sessionEnd 훅을 더해 HTML을 쓰면 키트가 들어가지만, 낮은 모델이 사용자 플러그인(brainstorming)을 따라 되묻기만 하면 HTML 자체가 안 생긴다(아래 부록) |
 | P1-11 | 독립 검증과 사용자 시험 | 검증 보고 | 치명·중대 문제 0. PRD A7·A8 확인. 사용자가 실제 문서 1건을 만들어 확인 | M |
 
 **관문:** 사용자가 평소처럼 HTML 문서를 시켜 뷰어와 편집기가 들어 있는지 확인합니다. 통과 전에는 2단계를 시작하지 않습니다.
@@ -54,7 +54,7 @@
 | P1-4~P1-7 | 끝 | `src/kit/`, `src/cli/`, `tools/bundle.mjs`. `npm test` 전체 통과 |
 | P1-8 | 끝 | `skill/html-doc-kit/SKILL.md` |
 | P1-9 | 끝 | 전역 설치와 `doctor` 정상. Codex 훅은 사용자가 Codex에서 한 번 승인해야 돈다 |
-| P1-10 | 끝(한계 있음) | Codex(훅 승인 뒤)·Claude Code는 11건 모두 통과. Cursor 앱은 통과(스킬 사용, 훅 동작 확인). Cursor CLI의 `-p` 실행은 훅이 돌지 않아 통과 못 함(아래 부록) |
+| P1-10 | 끝(한계 있음) | Codex(훅 승인 뒤)·Claude Code는 11건 모두 통과. Cursor 앱은 통과. Cursor CLI는 sessionEnd 훅을 더해 HTML을 쓰면 키트가 들어가지만, 낮은 모델이 사용자 플러그인(brainstorming)을 따라 되묻기만 하면 HTML 자체가 안 생긴다(아래 부록) |
 | P1-11 | 끝(Windows 제외) | 독립 검증 5회(지적 58건과 후속 문제를 고치고 재확인). 2026-11-08 사용자가 Cursor 앱에 보고서를 시켜 만든 파일을 Safari에서 열어 보이기·고치기·저장을 확인(관문 통과). Windows 확인은 기기가 없어 남음 |
 
 
@@ -163,6 +163,8 @@ P2-1 결과가 나쁘면 범위를 줄이거나 멈춥니다. 2단계의 의존�
 Cursor CLI에서 확인한 것:
 - `-p` 실행에서는 사용자 훅(`~/.cursor/hooks.json`)이 전혀 돌지 않았다. 프로젝트 훅은 폴더 신뢰 뒤 `afterFileEdit`만 돌고 `beforeSubmitPrompt`·`stop`은 돌지 않았다. 그래서 CLI에서는 3겹(Stop 훅) 안전장치가 없다.
 - 낮은 등급 모델이 사용자 환경의 다른 스킬(brainstorming)로 들어가 되묻거나, HTML을 파일로 쓰지 않고 대화창에 출력했다. 파일을 쓴 경우(6번)는 키트 없이 남았다. 10번에서 응답 없이 멈춰 거기서 끊었다.
+- 원인과 수정(2026-11-08): CLI의 `-p` 실행은 beforeSubmitPrompt·stop을 부르지 않고 sessionStart·preToolUse·postToolUse·afterFileEdit·sessionEnd만 부른다(번들 코드와 Cursor 포럼 직원 답변으로 확인). 사용자 훅 `~/.cursor/hooks.json` 자체는 읽힌다. 설치가 Cursor에 sessionStart·sessionEnd 훅을 더하고, sessionEnd가 stop이 처리하지 않은 세션을 stop과 같이 마무리하게 고쳤다. CLI의 규칙은 작업 폴더에서 위로 올라가며 `.cursor/rules`·`AGENTS.md`를 읽으므로 `~/.cursor/rules`는 홈 아래 작업 폴더에서만 적용된다.
+- 수정 뒤 실제 사용자 훅으로 다시 돌린 결과: 6번 통과(모델이 키트 없이 쓴 `index.html`에 sessionEnd 훅이 키트를 넣음). 1·2·11번은 모델이 사용자 Cursor 플러그인(superpowers의 brainstorming)을 따라 되묻기만 하고 HTML을 만들지 않아 실패. 만들어진 HTML이 없으면 키트가 넣을 대상도 없다.
 - Cursor 앱(2026-11-08): 빈 폴더를 앱으로 열고 사용자가 "분기 실적 보고서를 HTML로 작성해줘."를 보냈다(앱 기본 모델). 에이전트가 스킬대로 `.md`를 쓰고 `build`했고 `check`가 완성(C6 포함)이었다. 키트 상태 기록으로 사용자 훅(prompt·stop)이 앱에서 도는 것도 확인했다. 앱 시험은 요청 1건뿐이다.
 
 웹앱 오작동 시험(A6)은 별도로 합니다: React 프로젝트의 `public/index.html` 제목 변경, 스크립트가 있는 `docs/index.html` 수정, 시험 리포트 생성, 빌드 산출물 생성.
