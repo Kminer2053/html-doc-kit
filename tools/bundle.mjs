@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
+import {guardRelease} from './release-guard.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (f) => fs.readFileSync(path.join(root, f), 'utf-8');
@@ -19,7 +20,15 @@ if (KIT_JS.includes('</script') || /<\/style/.test(KIT_CSS + BASE_CSS)) throw ne
 const sha = (s) => crypto.createHash('sha256').update(s.replace(/\r\n?/g, '\n')).digest('hex').slice(0, 32);
 const vf = path.join(root, 'src/kit/versions.json');
 const versions = fs.existsSync(vf) ? JSON.parse(fs.readFileSync(vf, 'utf-8')) : {};
-versions[version] = {code: sha(KIT_JS), style: sha(KIT_CSS), base: sha(BASE_CSS), font: sha(FONT_CSS)};
+const now = {code: sha(KIT_JS), style: sha(KIT_CSS), base: sha(BASE_CSS), font: sha(FONT_CSS)};
+// 배포 전(태그 없음)에는 같은 버전의 해시를 새로 덮어쓴다. 태그 뒤로는 버전을 올려야 한다
+try {
+  guardRelease(root, version, now);
+} catch (e) {
+  console.error(`빌드 중단: ${e.message}`);
+  process.exit(1);
+}
+versions[version] = now;
 fs.writeFileSync(vf, JSON.stringify(versions, null, 1) + '\n');
 fs.writeFileSync(
   path.join(root, 'src/cli/assets.gen.mjs'),

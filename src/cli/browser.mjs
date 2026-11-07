@@ -142,6 +142,22 @@ const VISIBLE = `(()=>{
     return null;
   };
   const sameColor=(a,b)=>Math.abs(a.r-b.r)+Math.abs(a.g-b.g)+Math.abs(a.b-b.b)<12;
+  // 문서가 스스로 숨긴 글(hidden 속성, 닫힌 dialog·details, aria-hidden, noscript, template). 문서 CSS 없이도 안 보이므로 보이는 비율의 분모에 넣지 않는다
+  const selfHidden=(e)=>{
+    if(e.closest('[hidden],dialog:not([open]),[aria-hidden="true"],noscript,template'))return true;
+    const d=e.closest('details:not([open])');if(!d)return false;
+    const s=e.closest('summary');return !(s&&s.parentElement===d);
+  };
+  // 글자를 칠하는 다른 방법: 외곽선·그림자, 배경을 글자 모양으로 자르기(그라데이션 글자)
+  const decorated=(c)=>c.textShadow!=='none'||parseFloat(c.webkitTextStrokeWidth||0)>0;
+  const clipped=(e)=>{
+    for(let x=e;x;x=x.parentElement){
+      const s=getComputedStyle(x);
+      if((s.backgroundClip==='text'||s.webkitBackgroundClip==='text')&&(s.backgroundImage!=='none'||(rgba(s.backgroundColor)||{a:0}).a>=0.05))return true;
+      if(x.classList&&x.classList.contains('dk-page'))break;
+    }
+    return false;
+  };
   pages.forEach((p,i)=>{
     dkKit.go(i);
     const fixed=p.hasAttribute('data-dk-fixed');
@@ -150,10 +166,15 @@ const VISIBLE = `(()=>{
     const w=document.createTreeWalker(p,NodeFilter.SHOW_TEXT);let all=0,seen=0,sampled=0,covered=0,probes=0,below=false;
     for(let n=w.nextNode();n;n=w.nextNode()){
       const t=n.nodeValue.trim();if(!t||n.parentElement.closest('style,script,svg,select,textarea,datalist'))continue;
+      if(selfHidden(n.parentElement)){const r=document.createRange();r.selectNodeContents(n);if(!r.getClientRects().length)continue}
       all+=t.length;
       const e=n.parentElement;const c=getComputedStyle(e);
       if(c.visibility!=='visible')continue;
-      const color=rgba(c.color);if(color&&color.a<0.05)continue;
+      // 실제로 칠하는 글자색은 -webkit-text-fill-color다(따로 정하지 않으면 color와 같다)
+      const fill=rgba(c.webkitTextFillColor||'')||rgba(c.color);
+      const deco=decorated(c);
+      if(fill&&fill.a<0.05&&!deco&&!clipped(e))continue;
+      const color=fill&&fill.a>=0.05&&!deco?fill:null;
       if(opacity(e,p)<0.05)continue;
       if(parseFloat(c.fontSize)<3)continue;
       const r=document.createRange();r.selectNodeContents(n);const b=r.getBoundingClientRect();
@@ -175,7 +196,7 @@ const VISIBLE = `(()=>{
         probes++;sampled+=t.length;
         const stack=document.elementsFromPoint(cx,cy);
         if(c.pointerEvents!=='none'&&!stack.includes(e)){covered+=t.length;continue}
-        if(color&&c.textShadow==='none'&&parseFloat(c.webkitTextStrokeWidth||0)===0){
+        if(color){
           const k=paper(e,stack);if(k&&sameColor(color,k)){covered+=t.length;continue}
         }
       }

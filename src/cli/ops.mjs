@@ -165,7 +165,7 @@ export async function ensure(file, opts = {}) {
   const wanted = opts.output || (isMd ? file.replace(MD, '.html') : file);
   const inPlace = samePath(wanted, file);
   if (isMd && inPlace) throw new Error('결과 파일이 입력 마크다운과 같습니다. -o로 .html 경로를 지정하세요');
-  const source = readHtml(file, {sniff: !isMd});
+  const source = readHtml(file, {sniff: !isMd, warn});
   if (isOff(source)) return {file, excluded: true, warnings, notices, c6: {status: 'skip', reason: '제외 표식', warnings: []}, changed: false};
   const report = isMd ? {errors: ['입력이 마크다운입니다']} : inspect(source);
   if (report.newer) {
@@ -194,7 +194,8 @@ export async function ensure(file, opts = {}) {
 }
 
 export async function check(file, opts = {}) {
-  const source = readHtml(file);
+  const readWarnings = [];
+  const source = readHtml(file, {warn: (m) => readWarnings.push(m)});
   if (isOff(source)) return {file, status: 'excluded', errors: [], warnings: [], c6: {status: 'skip', reason: '제외 표식'}};
   const report = inspect(source);
   if (report.newer) return {file, status: 'complete', errors: [], warnings: [`파일의 키트(${report.version})가 설치된 키트(${VERSION})보다 새것이라 부품이 있는지만 보았습니다`], c6: {status: 'skip', reason: '더 새 버전', warnings: []}, pages: report.pages, version: report.version};
@@ -202,7 +203,7 @@ export async function check(file, opts = {}) {
   const errors = [...report.errors];
   if (c6.status === 'fail') errors.push(`C6 ${c6.reason}`);
   const inputFor = errors.length ? inputOf(file) : null;
-  return {file, status: errors.length ? 'incomplete' : 'complete', errors, warnings: c6.warnings || [], c6, pages: report.pages, version: report.version, ...(inputFor ? {inputFor} : {})};
+  return {file, status: errors.length ? 'incomplete' : 'complete', errors, warnings: [...readWarnings, ...(c6.warnings || [])], c6, pages: report.pages, version: report.version, ...(inputFor ? {inputFor} : {})};
 }
 
 export function extract(file, output) {

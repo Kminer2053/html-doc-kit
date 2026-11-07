@@ -7,10 +7,15 @@ import {pathToFileURL} from 'node:url';
 
 const CHROME = process.env.DOC_KIT_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// 배경 탭으로 취급돼 타이머·화면 그리기가 멈추지 않게 하는 실행 인자
+export const BG_FLAGS = ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'];
+// 화면 한 번 그리기를 기다린다. requestAnimationFrame이 멈춰도 0.1초 뒤에는 넘어간다
+export const FRAME_EXPR = 'new Promise(r=>{let n=0;const one=(k)=>{let done=false;const go=()=>{if(done)return;done=true;k()};requestAnimationFrame(go);setTimeout(go,100)};one(()=>one(()=>r(true)))})';
 
 export async function open(width = 1920, height = 1166) {
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'ax2030-ed-'));
-  const proc = spawn(CHROME, ['--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=0', 'about:blank'], {stdio: 'ignore'});
+  const args = ['--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--disable-gpu', '--hide-scrollbars', ...BG_FLAGS, '--remote-debugging-port=0', 'about:blank'];
+  const proc = spawn(CHROME, args, {stdio: 'ignore'});
   let port = null;
   for (let i = 0; i < 200 && !port; i++) {
     try {
@@ -94,6 +99,16 @@ export async function open(width = 1920, height = 1166) {
     await Promise.race([exited, sleep(4000)]);
     fs.rmSync(profile, {recursive: true, force: true, maxRetries: 10, retryDelay: 200});
   };
-  return {send, ev, nav, shot, key, type, click, close, events};
+  const settle = () => ev(FRAME_EXPR);
+  // 조건식이 참이 될 때까지 짧게 반복 확인한다(고정 대기 대신). 시간 안에 참이 되면 true
+  const until = async (expression, timeout = 5000, every = 50) => {
+    const end = Date.now() + timeout;
+    for (;;) {
+      if (await ev(`!!(${expression})`)) return true;
+      if (Date.now() >= end) return false;
+      await sleep(every);
+    }
+  };
+  return {send, ev, nav, shot, key, type, click, close, events, settle, until, args};
 }
 export const CAPTURE_CSS = `.controls,.app-footer,.speaker{display:none!important}html,body{margin:0;background:#fff;overflow:hidden}#workspace{display:block!important;height:auto!important;padding:0!important}#viewport{display:block!important;overflow:visible!important}#canvas{zoom:1!important}.slide{box-shadow:none!important}`;

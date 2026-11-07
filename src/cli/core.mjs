@@ -73,6 +73,7 @@ export function inlineCssUrls(css, baseDir, warn) {
 export function sanitize(root, baseDir, warn) {
   const css = [];
   let scripts = 0;
+  const dropped = new Map(); // 스크립트 밖에 지운 요소와 개수. 말없이 지우지 않고 알린다
   walk(root, (n) => {
     if (!isEl(n)) return true;
     if (n.tagName === 'plaintext') {
@@ -87,6 +88,7 @@ export function sanitize(root, baseDir, warn) {
     }
     if (DROP.has(tag)) {
       if (tag === 'script' && !(attr(n, 'id') || '').startsWith('dk-')) scripts++;
+      if (tag !== 'script') dropped.set(tag, (dropped.get(tag) || 0) + 1);
       remove(n);
       return false;
     }
@@ -145,6 +147,7 @@ export function sanitize(root, baseDir, warn) {
     return true;
   });
   if (scripts) warn(`스크립트 ${scripts}개를 뺐습니다. 차트는 SVG나 표로 넣어 주세요`);
+  if (dropped.size) warn(`지운 요소: ${[...dropped].map(([t, k]) => `${t} ${k}개`).join(', ')}(뷰어 안에서 외부 내용을 띄우지 않습니다)`);
   return css.join('\n');
 }
 
@@ -305,7 +308,7 @@ export const newId = () => crypto.randomBytes(6).toString('hex');
 export function readSource(file, opts, warn) {
   const baseDir = path.dirname(path.resolve(file));
   const isMd = /\.(md|markdown)$/i.test(file);
-  const source = restoreAssets(readHtml(file, {sniff: !isMd}), file);
+  const source = restoreAssets(readHtml(file, {sniff: !isMd, warn}), file);
   return readSourceText(source, baseDir, isMd, opts, warn);
 }
 export const assetsFile = (bodyFile) => `${bodyFile}.assets.json`;

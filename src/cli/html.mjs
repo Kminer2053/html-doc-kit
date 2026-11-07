@@ -5,15 +5,41 @@ import {parse, serialize, serializeOuter} from 'parse5';
 export {parse, serialize, serializeOuter};
 
 const strict = (label, buf) => new TextDecoder(label, {fatal: true}).decode(buf);
+// 파일 끝에서 멀티바이트 글자가 잘린 UTF-8(쓰다 만 파일 등)은 그 잘린 조각만 빼고 푼다.
+// 끝의 1~3바이트가 '시작 바이트 + 모자란 이어지는 바이트'일 때만이다. 중간에 깨진 바이트가 있으면 그대로 오류다
+function utf8(buf, warn) {
+  try {
+    return strict('utf-8', buf);
+  } catch (e) {
+    for (let k = 1; k <= 3 && k < buf.length; k++) {
+      const lead = buf[buf.length - k];
+      if (lead < 0xc2 || lead > 0xf4) {
+        if (lead >= 0x80 && lead <= 0xbf) continue; // 이어지는 바이트: 한 칸 더 앞을 본다
+        break;
+      }
+      const need = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : 2;
+      if (k >= need) break; // 글자가 다 있다. 끝이 잘린 것이 아니다
+      let text;
+      try {
+        text = strict('utf-8', buf.subarray(0, buf.length - k));
+      } catch {
+        break;
+      }
+      if (warn) warn(`파일 끝에서 잘린 글자 조각(${k}바이트)을 빼고 읽었습니다. 파일이 끝까지 저장되었는지 확인하세요`);
+      return text;
+    }
+    throw e;
+  }
+}
 // 바이트를 글자로 푼다. 어떤 인코딩으로도 깨끗이 풀리지 않으면 깨진 글자로 덮어쓰지 않도록 오류를 낸다
-export function decodeHtml(buf, {sniff = true} = {}) {
-  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return strict('utf-8', buf);
+export function decodeHtml(buf, {sniff = true, warn} = {}) {
+  if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) return utf8(buf, warn);
   if (buf[0] === 0xff && buf[1] === 0xfe) return strict('utf-16le', buf);
   if (buf[0] === 0xfe && buf[1] === 0xff) return strict('utf-16be', buf);
   if (buf[0] === 0x3c && buf[1] === 0) return strict('utf-16le', buf); // 표식 없는 UTF-16
   if (buf[0] === 0 && buf[1] === 0x3c) return strict('utf-16be', buf);
   try {
-    return strict('utf-8', buf); // 선언이 틀린 UTF-8도 있으므로 먼저 본다
+    return utf8(buf, warn); // 선언이 틀린 UTF-8도 있으므로 먼저 본다
   } catch {}
   const head = buf.subarray(0, 4096).toString('latin1');
   const label = sniff && /<meta\b[^>]*?charset\s*=\s*["']?\s*([\w.:-]+)/i.exec(head)?.[1];

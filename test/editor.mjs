@@ -42,7 +42,9 @@ const state = (expr) => b.ev(`dkKit.state().${expr}`);
 const selectAll = () => b.key('a', 'KeyA', 65, 4);
 const backspace = () => b.key('Backspace', 'Backspace', 8);
 const esc = () => b.key('Escape', 'Escape', 27);
-const settle = () => b.ev('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+const settle = () => b.settle();
+// 임시 저장(0.8초 뒤)에 글이 들어갈 때까지 최대 5초 기다린다. 고정 대기는 느린 기계에서 간헐 실패한다
+const draftHas = (txt) => b.until(`(localStorage.getItem(${DRAFT})||'').includes(${JSON.stringify(txt)})`);
 const ready = async () => {
   for (let i = 0; i < 100 && !(await b.ev(`document.documentElement.dataset.dkReady==='1'`)); i++) await sleep(50);
 };
@@ -276,7 +278,7 @@ await scenario('임시 저장 되살리기', '#15', async () => {
   const p2 = findHost('연간 실적');
   await caretEnd(p2);
   await b.type('임시저장시험');
-  await sleep(1100);
+  await draftHas('임시저장시험');
   check('입력 뒤 임시 저장', await b.ev(`localStorage.getItem(${DRAFT})!==null`));
   await reload();
   check('다시 열면 불러오기 안내', await b.ev(`document.querySelector('.dk-banner')!=null`));
@@ -288,6 +290,22 @@ await scenario('임시 저장 되살리기', '#15', async () => {
   await b.ev(`document.querySelector('.dk-banner [data-a=drop]').click();1`);
   await reload();
   check('버리기 뒤 안내 없음', await b.ev(`document.querySelector('.dk-banner')==null&&${findHost('임시저장시험')}==null`));
+});
+
+// R11: 임시 저장 기다리기는 고정 대기가 아니라 짧게 반복 확인한다
+await scenario('시험 도우미: 늦게 참이 되는 조건을 끝까지 기다림', '#15', async () => {
+  await b.ev(`window.__late=0;setTimeout(()=>window.__late=1,1500);1`);
+  const t0 = Date.now();
+  const got = await b.until(`window.__late===1`);
+  const took = Date.now() - t0;
+  check('R11 1.5초 뒤 참이 되는 조건을 놓치지 않음', got === true && took >= 1400 && took < 4000, `${got} ${took}ms`);
+  const t1 = Date.now();
+  const never = await b.until(`false`, 300);
+  check('R11 끝내 거짓이면 정한 시간 뒤 false', never === false && Date.now() - t1 < 2000, `${never} ${Date.now() - t1}ms`);
+  const p = findHost('연간 실적');
+  await caretEnd(p);
+  await b.type('반복확인');
+  check('R11 입력 뒤 임시 저장을 5초 안에 확인', await draftHas('반복확인'));
 });
 
 await scenario('표지 그림 바꾸기 버튼', '#1', async () => {
@@ -364,7 +382,7 @@ await scenario('비운 가로 배치 칸', '#2', async () => {
 await scenario('임시 저장 창 뒤로 키가 새지 않음', '#3', async () => {
   await caretEnd(`document.querySelector('${ACTIVE} .page-header h1')`);
   await b.type('임시');
-  await sleep(1000);
+  await draftHas('임시');
   await reload();
   const i0 = await state('index');
   await b.key('ArrowRight', 'ArrowRight', 39);

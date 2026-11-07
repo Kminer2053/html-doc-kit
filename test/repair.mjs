@@ -60,6 +60,33 @@ for (const [name, src] of Object.entries(cases)) {
   if (r.status) console.log('   ', r.stderr.trim());
 }
 
+// R6·R7: 문서가 스스로 숨긴 긴 글, 그라데이션 글자는 문서 CSS를 버릴 이유가 아니다(브라우저 시험)
+{
+  const long = '감춘 내용이 아주 깁니다 '.repeat(30);
+  const grad = 'background:linear-gradient(90deg,#c00,#00c);-webkit-background-clip:text;background-clip:text';
+  const keepCss = {
+    'R6 hidden 속성 안의 긴 글': [plain('<style>.K{color:#123}</style>', `<h1 class=K>제목</h1><div hidden>${long}</div>`), '.K{color:#123}'],
+    'R6 닫힌 dialog·details 안의 긴 글': [plain('<style>.K{color:#123}</style>', `<h1 class=K>제목</h1><dialog><p>${long}</p></dialog><details><summary>더 보기</summary><p>${long}</p></details>`), '.K{color:#123}'],
+    'R7 그라데이션 글자(color:transparent)': [plain(`<style>.G{${grad};color:transparent}</style>`, `<h1 class=G>${'그라데이션 제목입니다 '.repeat(6)}</h1><p>짧은 글</p>`), 'background-clip:text'],
+    'R7 그라데이션 글자(text-fill-color)': [plain(`<style>.G{${grad};-webkit-text-fill-color:transparent}</style>`, `<h1 class=G>${'그라데이션 제목입니다 '.repeat(6)}</h1><p>짧은 글</p>`), 'text-fill-color:transparent'],
+  };
+  for (const [name, [src, css]] of Object.entries(keepCss)) {
+    const f = path.join(OUT, name.replace(/[^\w가-힣]/g, '_') + '.html');
+    fs.writeFileSync(f, src);
+    const r = run('ensure', f);
+    const c = run('check', f);
+    const after = fs.readFileSync(f, 'utf-8');
+    ok(`${name}: 완성이고 문서 CSS를 지킴`, r.status === 0 && c.status === 0 && after.includes(css) && !r.stdout.includes('스타일을 버리고'), r.stdout + r.stderr + c.stdout);
+    const before = fs.readFileSync(f);
+    ok(`${name}: 다시 돌려도 같음`, run('ensure', f).status === 0 && before.equals(fs.readFileSync(f)));
+  }
+  // 정말 안 보이는 글자는 여전히 잡는다(문서가 숨긴 글을 빼도 투명 글자는 투명이다)
+  const f = path.join(OUT, 'R7_투명_글자_그대로_잡음.html');
+  fs.writeFileSync(f, plain('<style>h1,p{-webkit-text-fill-color:transparent}</style>', BODY));
+  const r = run('ensure', f);
+  ok('R7 그라데이션 없는 투명 글자는 여전히 스타일을 버려 보이게 함', r.status === 0 && run('check', f).status === 0 && r.stdout.includes('스타일을 버리고'), r.stdout + r.stderr);
+}
+
 // 키트 파일이 망가진 경우
 const base = path.join(OUT, 'base.html');
 fs.writeFileSync(path.join(OUT, 'base.md'), `---\ntitle: 기준\ntype: slide\n---\n# ${WORD}\n본문\n\nNotes:\n메모보존\n\n---\n# 둘째\n둘째 쪽\n`);
@@ -197,6 +224,55 @@ fs.writeFileSync(ef('nometa.html'), garbled);
 const nm = run('ensure', ef('nometa.html'), '--no-browser');
 ok('31·38 풀 수 없으면 덮어쓰지 않고 오류', nm.status === 2 && garbled.equals(fs.readFileSync(ef('nometa.html'))) && nm.stderr.includes('인코딩'), nm.stderr);
 ok('31·38 check도 깨진 글자로 완성이라 하지 않음', run('check', ef('nometa.html'), '--no-browser').status === 2);
+// R5: 끝에서 멀티바이트 글자가 잘린 UTF-8은 잘린 조각만 빼고 받는다. 중간이 깨진 파일은 지금처럼 거부한다
+const cut = Buffer.concat([Buffer.from('<!doctype html><h1>제목</h1><p>본문입니다 '), Buffer.from('한').subarray(0, 2)]);
+fs.writeFileSync(ef('cut.html'), cut);
+const cutR = run('ensure', ef('cut.html'), '--no-browser');
+ok('R5 끝이 잘린 한국어 HTML도 입히고 경고', cutR.status === 0 && has(ef('cut.html'), '본문입니다') && !has(ef('cut.html'), '�') && cutR.stdout.includes('잘린 글자') && run('check', ef('cut.html'), '--no-browser').status === 0, cutR.stdout + cutR.stderr);
+const cutMid = Buffer.concat([Buffer.from('<!doctype html><h1>제'), Buffer.from([0xff]), Buffer.from('목</h1><p>본문'), Buffer.from('한').subarray(0, 2)]);
+fs.writeFileSync(ef('cutmid.html'), cutMid);
+const cutM = run('ensure', ef('cutmid.html'), '--no-browser');
+ok('R5 중간이 깨진 파일은 여전히 거부하고 그대로 둠', cutM.status === 2 && cutMid.equals(fs.readFileSync(ef('cutmid.html'))), cutM.stdout + cutM.stderr);
+// R10: iframe·object·embed·noscript를 지우면 알린다
+fs.writeFileSync(ef('frames.html'), plain('', `<h1>${WORD}</h1><iframe src="https://x.example"></iframe><object data="a.pdf"></object><embed src="b.swf"><noscript><p>스크립트 없음</p></noscript>`));
+const fr = run('ensure', ef('frames.html'), '--no-browser');
+ok('R10 지운 요소를 경고로 알림', fr.status === 0 && /지운 요소: .*iframe 1개/.test(fr.stdout) && fr.stdout.includes('object 1개') && fr.stdout.includes('embed 1개') && fr.stdout.includes('noscript 1개') && fr.stdout.includes('외부 내용을 띄우지 않습니다'), fr.stdout + fr.stderr);
+// R9: v<버전> 태그 뒤로는 같은 버전의 키트 해시를 바꾸지 못한다
+{
+  const {guardRelease, taggedVersions} = await import('../tools/release-guard.mjs');
+  const rel = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-kit-rel-'));
+  const g = (...a) => execFileSync('git', ['-C', rel, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], {stdio: 'ignore'});
+  const H = {code: 'a', style: 'b', base: 'c', font: 'd'};
+  fs.mkdirSync(path.join(rel, 'src/kit'), {recursive: true});
+  fs.writeFileSync(path.join(rel, 'src/kit/versions.json'), JSON.stringify({'1.0.0': H}));
+  g('init', '-q');
+  g('add', '-A');
+  g('commit', '-qm', 'x');
+  let noTag = true;
+  try {
+    guardRelease(rel, '1.0.0', {...H, code: 'z'});
+  } catch {
+    noTag = false;
+  }
+  ok('R9 태그가 없으면(배포 전) 해시를 덮어써도 됨', noTag && taggedVersions(rel, '1.0.0') === null);
+  g('tag', 'v1.0.0');
+  let msg = '';
+  try {
+    guardRelease(rel, '1.0.0', {...H, code: 'z'});
+  } catch (e) {
+    msg = e.message;
+  }
+  ok('R9 태그 뒤 같은 버전의 해시가 바뀌면 버전을 올리라며 멈춤', msg.includes('버전을 올린') && msg.includes('code'), msg);
+  let same = true;
+  try {
+    guardRelease(rel, '1.0.0', H);
+    guardRelease(rel, '1.0.1', {...H, code: 'z'});
+  } catch {
+    same = false;
+  }
+  ok('R9 같은 해시이거나 버전을 올리면 통과', same);
+  fs.rmSync(rel, {recursive: true, force: true});
+}
 
 // 36: build가 있던 결과를 지키고 알린다
 fs.writeFileSync(ef('n.md'), '# 첫판\n');
@@ -644,6 +720,8 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
   fs.writeFileSync(noChrome, '', {mode: 0o644}); // 실행 권한이 없어 바로 실패한다(띄우기 실패 = 미실행)
   const fast = {...process.env, DOC_KIT_HOME: hhome, DOC_KIT_CHROME: noChrome};
   const hk = (agent, event, input, e = fast) => spawnSync('node', [CLI, 'hook', agent, event], {encoding: 'utf-8', env: e, input: JSON.stringify(input)});
+  const pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+  const nextSecond = () => pause(1050 - (Date.now() % 1000)); // 커밋 시각(초)이 턴 시작과 겹치지 않게
   let n = 0;
   const session = () => {
     const dir = path.join(root, `p${++n}`);
@@ -677,10 +755,13 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     s.prompt();
     const out = s.stop();
     ok('1 중단된 턴의 파일을 다음 Stop에서 복구', hasKit(intr) && out.includes('intr.html'), out);
-    const bg = s.put('bg.html');
+    // R2: 정상으로 끝난 턴 뒤, 다음 턴 전에 사용자나 다른 프로그램이 바꾼 파일은 고치지 않는다
+    pause(1600);
+    const bg = s.put('user_saved.html');
+    pause(1600);
     s.prompt();
-    s.stop();
-    ok('1 Stop 뒤에 쓴 파일도 다음 Stop에서 복구', hasKit(bg));
+    const between = s.stop();
+    ok('R2 턴 사이에 사용자가 저장한 HTML은 다음 Stop이 고치지 않음', !hasKit(bg) && !between.includes('user_saved.html'), between);
     const quiet = s.put('later.html');
     const before = fs.statSync(quiet).mtimeMs;
     s.prompt();
@@ -697,6 +778,23 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     s.prompt();
     s.stop();
     ok('1 12시간 넘은 세션은 그동안 바뀐 파일까지 쓸어 담지 않음', !hasKit(oldHand));
+  }
+
+  // R2: 중단된 턴의 구간은 마지막 도구 사용까지만 훑는다. 그 뒤 턴 밖에서 저장한 파일은 그대로
+  {
+    const s = session();
+    s.prompt();
+    const intr = s.write('intr2.html');
+    pause(3300);
+    const user = s.put('user_after.html');
+    const t = new Date(Date.now() - 1700);
+    fs.utimesSync(user, t, t);
+    const byScript = s.put('script_out.html');
+    fs.utimesSync(byScript, new Date(fs.statSync(intr).mtimeMs), new Date(fs.statSync(intr).mtimeMs));
+    s.prompt();
+    const out = s.stop();
+    ok('R2 중단된 턴의 파일(도구·스캔)은 다음 Stop에서 처리', hasKit(intr) && hasKit(byScript), out);
+    ok('R2 중단된 턴이 끝난 뒤 턴 밖에서 저장한 파일은 고치지 않음', !hasKit(user), out);
   }
 
   // 4·26: 템플릿 판정을 좁히고, 그래도 건너뛰면 알린다
@@ -720,10 +818,10 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const a = s.write('out/report.html');
     const b = s.write('vendor/v.html');
     const c = s.write('target/t.html');
-    const d = s.write('dist/x.html');
+    const d = s.write('coverage/x.html');
     const out = s.stop();
     ok('10 out, target, vendor는 입힘', hasKit(a) && hasKit(b) && hasKit(c), out);
-    ok('10 앱 폴더에 도구로 쓴 파일은 제외 이유를 알림', !hasKit(d) && out.includes('제외:') && out.includes('dist'), out);
+    ok('10 리포트 폴더에 도구로 쓴 파일은 제외 이유를 알림', !hasKit(d) && out.includes('제외:') && out.includes('coverage'), out);
     const up = path.join(root, `up${n}`);
     fs.mkdirSync(path.join(up, 'a', 'b'), {recursive: true});
     fs.writeFileSync(path.join(up, 'package.json'), JSON.stringify({devDependencies: {vite: '^6'}}));
@@ -735,7 +833,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     ok('10 .git이 없으면 작업 폴더 위의 package.json은 보지 않음', hasKit(upf));
     const s2 = session();
     s2.prompt();
-    const many = Array.from({length: 12}, (_, i) => s2.write(`dist/d${i}.html`));
+    const many = Array.from({length: 12}, (_, i) => s2.write(`coverage/d${i}.html`));
     const o2 = s2.stop();
     ok('10 제외 알림 줄 수 상한', many.every((f) => !hasKit(f)) && o2.includes('그 밖에 넣지 않은 파일 4개'), o2.slice(0, 200));
   }
@@ -809,27 +907,54 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     ok('6 옛 수정 시각으로 옮겨 온 파일', hasKit(oldTo));
     void viaCpDir;
 
+    // R3: 스크립트 실행만으로는 바탕화면·다운로드를 훑지 않는다. 명령에 그 폴더가 나오면 그 폴더만 얕게
     const s2 = session();
     s2.prompt();
     const py = path.join(desk, 'gen.html');
-    s2.bash('python3 gen.py');
+    s2.bash('python3 gen.py && npm test');
     fs.writeFileSync(py, body);
     const dl = path.join(hhome, 'Downloads', 'dl.html');
     fs.mkdirSync(path.dirname(dl), {recursive: true});
     fs.writeFileSync(dl, body);
+    const o2 = s2.stop();
+    ok('R3 스크립트 실행만으로는 바탕화면·다운로드의 파일을 고치지 않음', !hasKit(py) && !hasKit(dl));
+    ok('N3 스크립트를 돌린 턴에 바탕화면·다운로드에 생긴 HTML은 확인 필요로 알림', o2.includes(`확인 필요: ${py}`) && o2.includes(`확인 필요: ${dl}`) && o2.includes('사용자 폴더라 그대로'), o2);
+    const s2b = session();
+    s2b.prompt();
+    const py2 = path.join(desk, 'gen2.html');
+    s2b.bash('python3 gen.py --out ~/Desktop/');
+    fs.writeFileSync(py2, body);
+    const dl2 = path.join(hhome, 'Downloads', 'dl2.html');
+    fs.writeFileSync(dl2, body);
     const deep = path.join(desk, 'deep', 'x.html');
     fs.mkdirSync(path.dirname(deep), {recursive: true});
     fs.writeFileSync(deep, body);
-    s2.stop();
-    ok('6 스크립트 실행이 있으면 바탕화면·다운로드를 얕게 훑음', hasKit(py) && hasKit(dl) && !hasKit(deep));
+    s2b.stop();
+    ok('R3 명령에 ~/Desktop이 나오면 바탕화면만 얕게 훑음', hasKit(py2) && !hasKit(dl2) && !hasKit(deep));
+    const s2c = session();
+    s2c.prompt();
+    const dl3 = path.join(hhome, 'Downloads', 'dl3.html');
+    s2c.bash('node make.mjs > "$HOME/Downloads/out.log"');
+    fs.writeFileSync(dl3, body);
+    s2c.stop();
+    ok('R3 $HOME/Downloads 경로가 나오면 다운로드를 얕게 훑음', hasKit(dl3));
 
     const s3 = session();
     s3.prompt();
     const untouched = path.join(desk, 'quiet.html');
     fs.writeFileSync(untouched, body);
-    s3.bash('ls -la');
-    s3.stop();
-    ok('6 HTML도 스크립트도 없는 Bash면 바탕화면을 보지 않음', !hasKit(untouched));
+    s3.bash('ls -la && git status');
+    const o3 = s3.stop();
+    ok('6 HTML도 스크립트도 없는 Bash면 바탕화면을 보지 않음', !hasKit(untouched) && !o3.includes('확인 필요'), o3);
+    // N3: 스크립트를 돌리지 않은 턴, 턴 전에 바뀐 파일은 알리지 않는다
+    const s5 = session();
+    const before = path.join(desk, 'before.html');
+    fs.writeFileSync(before, body);
+    fs.utimesSync(before, oldTime, oldTime);
+    s5.prompt();
+    s5.bash('python3 gen.py');
+    const o6 = s5.stop();
+    ok('N3 턴 전에 있던 바탕화면 HTML은 알리지 않음', !hasKit(before) && !o6.includes('before.html'), o6);
 
     const s4 = session();
     s4.prompt();
@@ -898,11 +1023,10 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const dot = s.put('.cache/x/c.html');
     const vsc = s.put('.vscode/extensions/w.html');
     const app = s.put('AppData/Local/a.html');
-    const bld = s.put('_build/html/index.html');
-    const site = s.put('site/index.html');
+    const nm = s.put('node_modules/pkg/readme.html');
     const real = s.put('note.html');
     s.stop();
-    ok('27·41 점 폴더, Library, AppData, _build, site는 스캔하지 않음', [lib, dot, vsc, app, bld, site].every((f) => !hasKit(f)) && hasKit(real));
+    ok('27·41 점 폴더, Library, AppData, node_modules는 스캔하지 않음', [lib, dot, vsc, app, nm].every((f) => !hasKit(f)) && hasKit(real));
 
     // 작업 폴더가 홈이면 스캔을 끄고 도구로 쓴 파일만 본다
     const homeId = {session_id: `home${n}`, cwd: hhome};
@@ -932,12 +1056,80 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     git('add', '.');
     git('commit', '-qm', '2');
     git('checkout', '-q', '-');
+    nextSecond();
     g.prompt();
     git('checkout', '-q', 'f');
     const fresh = g.put('new.html');
     const ign = g.put('ignored/i.html');
     const gout = g.stop();
     ok('40 git checkout으로 바뀐 파일은 입히지 않음', !hasKit(d1) && git('status', '--porcelain', '--', 'docs').stdout === '', gout);
+    ok('R1 checkout으로 건너뛴 파일도 알림', gout.includes('d1.html') && gout.includes('checkout·pull·rebase 등으로'), gout);
+
+    // N2: 이번 턴 전에 커밋한 파일을 rebase로 다시 쓰면 커미터 시각만 지금이 된다. 입히지 않고 알린다
+    {
+      const rb = session();
+      const rgit = (...a) => spawnSync('git', ['-C', rb.dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], {encoding: 'utf-8'});
+      const old = (d, ...a) => spawnSync('git', ['-C', rb.dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], {encoding: 'utf-8', env: {...process.env, GIT_AUTHOR_DATE: d, GIT_COMMITTER_DATE: d}});
+      rgit('init', '-q', '-b', 'main');
+      rb.put('a.txt', 'a');
+      old('2020-01-01T00:00:00', 'add', '.');
+      old('2020-01-01T00:00:00', 'commit', '-qm', 'a');
+      rgit('checkout', '-qb', 'f');
+      const notes = rb.put('notes.html');
+      rgit('add', '.');
+      old('2020-01-02T00:00:00', 'commit', '-qm', 'notes');
+      rgit('checkout', '-q', 'main');
+      rb.put('b.txt', 'b');
+      rgit('add', '.');
+      old('2020-01-03T00:00:00', 'commit', '-qm', 'b');
+      rgit('checkout', '-q', 'f');
+      nextSecond();
+      rb.prompt();
+      nextSecond();
+      rgit('rebase', '-q', 'main');
+      rb.bash('git rebase main');
+      const rout = rb.stop();
+      ok('N2 rebase로 커미터 시각만 바뀐 지난 커밋 파일은 입히지 않고 알림', !hasKit(notes) && rgit('status', '--porcelain').stdout === '' && rout.includes('notes.html') && rout.includes('rebase'), rout);
+    }
+    // N2b: 이번 턴에 동료가 만든 커밋을 pull로 받은 파일도 이번 작업의 커밋이 아니다
+    {
+      const remote = session();
+      const mgit = (dir, ...a) => spawnSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], {encoding: 'utf-8'});
+      mgit(remote.dir, 'init', '-q', '-b', 'main');
+      remote.put('a.txt', 'a');
+      mgit(remote.dir, 'add', '.');
+      mgit(remote.dir, 'commit', '-qm', 'a');
+      const local = session();
+      fs.rmSync(local.dir, {recursive: true, force: true});
+      spawnSync('git', ['clone', '-q', remote.dir, local.dir]);
+      nextSecond();
+      local.prompt();
+      nextSecond();
+      remote.put('colleague.html');
+      mgit(remote.dir, 'add', '.');
+      mgit(remote.dir, 'commit', '-qm', 'c');
+      mgit(local.dir, 'pull', '-q');
+      local.bash('git pull');
+      const pout = local.stop();
+      const col = path.join(local.dir, 'colleague.html');
+      ok('N2 이번 턴에 pull로 받은 동료 커밋 파일은 입히지 않고 알림', fs.existsSync(col) && !hasKit(col) && mgit(local.dir, 'status', '--porcelain').stdout === '' && pout.includes('colleague.html'), pout);
+    }
+
+    // R1: 같은 턴에 스크립트로 만들고 커밋한 파일은 HEAD와 같아도 입힌다
+    const c = session();
+    const cgit = (...a) => spawnSync('git', ['-C', c.dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], {encoding: 'utf-8'});
+    cgit('init', '-q');
+    c.put('README.md', '# r');
+    cgit('add', '.');
+    cgit('commit', '-qm', '0');
+    nextSecond();
+    c.prompt();
+    const rep = c.put('rep.html');
+    cgit('add', '-A');
+    cgit('commit', '-qm', 'x');
+    c.bash('python3 gen.py && git add -A && git commit -m x');
+    const cout = c.stop();
+    ok('R1 같은 턴에 커밋된, 스캔으로 찾은 파일도 입힘', hasKit(rep) && cout.includes('rep.html'), cout);
     ok('40 git에 없는 새 파일은 입힘', hasKit(fresh));
     ok('40 git이 무시하는 파일은 건너뛰고 알림', !hasKit(ign) && gout.includes('git이 무시'), gout);
 
@@ -973,19 +1165,86 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       s.stop();
       ok(`39 설정 ${conf}`, !hasKit(f));
     }
-    const s = session();
-    s.prompt();
-    const fs5 = ['static/about.html', 'views/error.html', 'templates/t.html', 'partials/header.html', 'emails/welcome.html'].map((r) => s.write(r, '<div>조각</div>'));
-    s.stop();
-    ok('39 static, views, templates, partials, emails 제외', fs5.every((f) => !hasKit(f)));
-    for (const marker of ['go.mod', 'pyproject.toml', 'composer.json', 'conf.py']) {
+    const appDirs = ['static/about.html', 'views/error.html', 'templates/t.html', 'partials/header.html', 'emails/welcome.html', 'public/p.html', 'site/index.html', '_build/html/index.html'];
+    // R4: 앱 신호가 없는 평범한 폴더에서는 이런 이름도 문서 폴더다. 스크립트가 쓴 파일(스캔)도 입힌다
+    // 스캔 상한(5개)에 걸리지 않게 네 개씩 나눈다
+    for (const part of [appDirs.slice(0, 4), appDirs.slice(4)]) {
+      const s = session();
+      s.prompt();
+      const fs5 = part.map((r) => s.put(r));
+      const out = s.stop();
+      ok(`R4 앱 신호가 없으면 ${part.map((r) => r.split('/')[0]).join(', ')}도 입힘`, fs5.every(hasKit), fs5.filter((f) => !hasKit(f)).join() + out);
+    }
+    // R4: 앱 신호가 있으면 빼고, 스캔으로 찾은 파일도 이유를 알린다
+    for (const [sig, text] of [['package.json', JSON.stringify({dependencies: {express: '4'}})], ['requirements.txt', 'numpy==2\n']]) {
+      const s = session();
+      s.put(sig, text);
+      s.prompt();
+      const fs5 = appDirs.map((r) => s.put(r));
+      const out = s.stop();
+      ok(`R4 앱 신호(${sig})가 있으면 앱 폴더를 빼고 알림`, fs5.every((f) => !hasKit(f)) && out.includes('제외:') && out.includes('emails') && out.includes(sig === 'package.json' ? 'express' : '앱 폴더'), out);
+    }
+    // R8: 언어 일반 신호만으로는 앱이 아니다. 평범한 보고서는 사본 없이 제자리에서 입힌다
+    for (const marker of ['go.mod', 'pyproject.toml', 'composer.json', 'conf.py', 'requirements.txt', 'setup.py', 'Cargo.toml', 'pom.xml', 'build.gradle', 'mix.exs', 'Gemfile']) {
       const a = session();
       a.put(marker, '');
+      a.prompt();
+      const f = a.write('report.html');
+      const out = a.stop();
+      ok(`R8 언어 신호 ${marker}만 있으면 제자리에서 입힘`, hasKit(f) && !fs.existsSync(path.join(a.dir, 'report_편집용.html')), out);
+    }
+    // R8: 서버 웹 프레임워크 이름이 있으면 앱 폴더 밖 HTML은 덮어쓰지 않고 _편집용 사본을 만든다
+    for (const [marker, text, name] of [
+      ['requirements.txt', 'numpy\nFlask==3.0\n', 'Flask'],
+      ['pyproject.toml', '[project]\ndependencies = ["django>=5"]\n', 'django'],
+      ['Gemfile', "source 'https://rubygems.org'\ngem 'rails', '~> 7'\n", 'rails'],
+      ['pom.xml', '<artifactId>spring-boot-starter-web</artifactId>', 'spring-boot'],
+      ['go.mod', 'module x\nrequire github.com/gin-gonic/gin v1.9.0\n', 'gin-gonic'],
+      ['Cargo.toml', '[dependencies]\naxum = "0.7"\n', 'axum'],
+      ['mix.exs', '{:phoenix, "~> 1.7"}', 'phoenix'],
+    ]) {
+      const a = session();
+      a.put(marker, text);
       a.prompt();
       const f = a.write('index.html');
       const before = fs.readFileSync(f);
       const out = a.stop();
-      ok(`39 애매한 신호 ${marker}는 사본`, before.equals(fs.readFileSync(f)) && hasKit(path.join(a.dir, 'index_편집용.html')) && out.includes(marker), out);
+      const copy = path.join(a.dir, 'index_편집용.html');
+      ok(`R8 ${marker}의 웹 프레임워크(${name})면 원본은 두고 사본을 만들어 알림`, before.equals(fs.readFileSync(f)) && hasKit(copy) && out.includes('index_편집용.html') && out.includes(name), out);
+    }
+    // N1: 서버 웹 프레임워크 프로젝트에서 앱 폴더 안은 빼고, 스크립트가 앱 폴더 밖에 만든 HTML은 사본을 만든다
+    {
+      const a = session();
+      a.put('requirements.txt', 'flask==3\n');
+      a.prompt();
+      const tpl = a.put('templates/page.html');
+      const rep = a.put('reports/r.html');
+      const out = a.stop();
+      ok('N1 flask 프로젝트의 templates/는 빼고 알림, 그 밖은 사본', !hasKit(tpl) && out.includes('templates/') && out.includes('flask') && !hasKit(rep) && hasKit(path.join(a.dir, 'reports', 'r_편집용.html')), out);
+    }
+    // N1: 템플릿 엔진·문서 생성기·노트북 이름은 웹앱 신호가 아니다
+    for (const [marker, text] of [
+      ['requirements.txt', 'numpy==1.26.4\npandas==2.2.2\nJinja2==3.1.4\ntornado==6.4\nMarkupSafe==2.1\njupyterlab==4\n'],
+      ['pyproject.toml', '[project]\nname="mylib"\n[project.optional-dependencies]\ndocs=["sphinx"]\n'],
+      ['Gemfile', "gem 'jekyll', '~> 4'\n"],
+      ['conf.py', "extensions = ['sphinx.ext.autodoc']\nhtml_theme = 'alabaster'\n"],
+    ]) {
+      const a = session();
+      a.put(marker, text);
+      a.prompt();
+      const f = a.write('out/report.html');
+      const built = a.put(marker === 'Gemfile' ? '_site/index.html' : '_build/html/index.html');
+      const out = a.stop();
+      ok(`N1 ${marker}의 ${text.split('\n')[0].slice(0, 30)}…는 문서로 보고 제자리에서 입힘, 출력 폴더는 뺌`, hasKit(f) && !fs.existsSync(path.join(a.dir, 'out', 'report_편집용.html')) && !hasKit(built) && out.includes('앱 폴더'), out);
+    }
+    {
+      const a = session();
+      a.put('requirements.txt', 'pandas\n');
+      a.prompt();
+      const tpl = a.write('templates/page.html');
+      const doc = a.write('reports/r.html');
+      const out = a.stop();
+      ok('R8 언어 프로젝트의 templates/ 안 HTML은 앱으로 보고 알림, 그 밖은 입힘', !hasKit(tpl) && out.includes('templates') && hasKit(doc), out);
     }
     const plainPkg = session();
     plainPkg.put('package.json', JSON.stringify({dependencies: {lodash: '1'}}));
