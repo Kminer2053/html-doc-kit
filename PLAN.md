@@ -54,7 +54,7 @@
 | P1-4~P1-7 | 끝 | `src/kit/`, `src/cli/`, `tools/bundle.mjs`. `npm test` 전체 통과 |
 | P1-8 | 끝 | `skill/html-doc-kit/SKILL.md` |
 | P1-9 | 끝 | 전역 설치와 `doctor` 정상. Codex 훅은 사용자가 Codex에서 한 번 승인해야 돈다 |
-| P1-10 | 일부 | Codex(훅 승인 뒤)·Claude Code는 11건 모두 통과. Cursor CLI는 통과 못 함(아래 부록). Cursor 앱(IDE)은 직접 확인 필요 |
+| P1-10 | 끝(한계 있음) | Codex(훅 승인 뒤)·Claude Code는 11건 모두 통과. Cursor 앱은 통과(스킬 사용, 훅 동작 확인). Cursor CLI의 `-p` 실행은 훅이 돌지 않아 통과 못 함(아래 부록) |
 | P1-11 | 일부 | 독립 검증 5회(지적 58건과 후속 문제를 고치고 재확인). A8(Safari·Windows)과 사용자 시험은 남음 |
 
 
@@ -163,6 +163,6 @@ P2-1 결과가 나쁘면 범위를 줄이거나 멈춥니다. 2단계의 의존�
 Cursor CLI에서 확인한 것:
 - `-p` 실행에서는 사용자 훅(`~/.cursor/hooks.json`)이 전혀 돌지 않았다. 프로젝트 훅은 폴더 신뢰 뒤 `afterFileEdit`만 돌고 `beforeSubmitPrompt`·`stop`은 돌지 않았다. 그래서 CLI에서는 3겹(Stop 훅) 안전장치가 없다.
 - 낮은 등급 모델이 사용자 환경의 다른 스킬(brainstorming)로 들어가 되묻거나, HTML을 파일로 쓰지 않고 대화창에 출력했다. 파일을 쓴 경우(6번)는 키트 없이 남았다. 10번에서 응답 없이 멈춰 거기서 끊었다.
-- Cursor 앱(IDE)에서 훅이 도는지는 CLI로 확인할 수 없다. 사용자가 앱에서 HTML 문서를 하나 시켜 확인해야 한다.
+- Cursor 앱(2026-11-08): 빈 폴더를 앱으로 열고 사용자가 "분기 실적 보고서를 HTML로 작성해줘."를 보냈다(앱 기본 모델). 에이전트가 스킬대로 `.md`를 쓰고 `build`했고 `check`가 완성(C6 포함)이었다. 키트 상태 기록으로 사용자 훅(prompt·stop)이 앱에서 도는 것도 확인했다. 앱 시험은 요청 1건뿐이다.
 
 웹앱 오작동 시험(A6)은 별도로 합니다: React 프로젝트의 `public/index.html` 제목 변경, 스크립트가 있는 `docs/index.html` 수정, 시험 리포트 생성, 빌드 산출물 생성.
