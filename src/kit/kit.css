@@ -7,6 +7,8 @@
 .dk-page:not([data-dk-fixed]) .dk-page-inner{overflow-x:auto;overflow-y:hidden}
 .dk-measuring .dk-page{zoom:1!important}
 .dk-source-page{top:auto;left:auto}
+/* 고정 크기 쪽에서는 원래 쪽 요소가 쪽 높이를 채운다. 안쪽에서 height:100%로 쪽을 채우는 장표가 높이 0으로 접히지 않게. 문서 CSS가 높이를 정하면 그쪽이 이긴다 */
+:where(.dk-page[data-dk-fixed]>.dk-page-inner>.dk-source-page){box-sizing:border-box;height:100%}
 body.dk-js{margin:0;height:100vh;overflow:hidden;background:#24384c}
 body.dk-js #dk-document>.dk-page:not(.dk-active){display:none}
 body.dk-js.dk-reading #dk-document>.dk-page:not(.dk-active){display:block}

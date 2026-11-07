@@ -66,9 +66,10 @@ function placeOutput(output, notices, opts) {
 }
 
 // build·apply의 입력 HTML을 적어 둔다. 훅과 판정은 이 파일을 결과물로 치지 않는다
-const inputsFile = (file) => path.join(dirOf(file), '.doc-kit', 'inputs.json');
+// .doc-kit 안의 입력이면 그 폴더의 inputs.json을 쓴다
+const inputsFile = (file) => (path.basename(dirOf(file)) === '.doc-kit' ? path.join(dirOf(file), 'inputs.json') : path.join(dirOf(file), '.doc-kit', 'inputs.json'));
 function recordInput(input, output) {
-  if (MD.test(input) || samePath(input, output) || path.basename(dirOf(input)) === '.doc-kit') return;
+  if (MD.test(input) || samePath(input, output)) return;
   const f = inputsFile(input);
   writeJson(f, {...readJson(f), [path.basename(input)]: path.resolve(output)});
 }
@@ -136,6 +137,25 @@ async function renderChecked(src, opts, warn) {
   }
 }
 
+// 입력으로 쓴 본문 HTML이 작업 폴더에 남으면 뷰어 없는 문서처럼 보인다. 결과를 만든 뒤 .doc-kit/sources/로 옮긴다(지우지 않는다)
+function stashInput(input, output, warn) {
+  if (MD.test(input) || samePath(input, output) || !fs.existsSync(input)) return;
+  if (path.resolve(input).split(path.sep).includes('.doc-kit')) return;
+  if (/data-doc-kit=/.test(fs.readFileSync(input, 'latin1'))) return;
+  const dir = path.join(dirOf(input), '.doc-kit', 'sources');
+  fs.mkdirSync(dir, {recursive: true});
+  const ext = path.extname(input);
+  let to = path.join(dir, path.basename(input));
+  if (fs.existsSync(to)) to = path.join(dir, `${path.basename(input, ext)}.${Date.now()}${ext}`);
+  try {
+    fs.renameSync(input, to);
+  } catch {
+    fs.copyFileSync(input, to);
+    fs.unlinkSync(input);
+  }
+  warn(`입력 본문 ${input}을 ${to}로 옮겼습니다. 뷰어가 없는 본문 파일이 문서처럼 남지 않게 하려는 것입니다. 고칠 때는 결과 파일에 extract를 쓰세요`);
+}
+
 export async function build(input, output, opts = {}) {
   const warnings = [];
   const warn = (m) => warnings.push(m);
@@ -153,6 +173,7 @@ export async function build(input, output, opts = {}) {
   fs.writeFileSync(output, html);
   remember(output, html);
   recordInput(input, output);
+  stashInput(input, output, warn);
   return {file: output, warnings: [...warnings, ...c6.warnings], notices: [], c6, changed: true};
 }
 

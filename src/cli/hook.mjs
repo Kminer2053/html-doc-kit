@@ -695,7 +695,7 @@ export async function handleFile(file, cwd) {
   if (parts.includes('.doc-kit')) {
     // 키트의 작업 파일은 입히지 않는다. 본문을 고치고 apply를 잊었으면 알린다
     const m = /^(.+)\.body\.html$/.exec(path.basename(file));
-    const target = m && path.join(path.dirname(path.dirname(path.resolve(file))), `${m[1]}.html`);
+    const target = inputOf(file) || (m && path.join(path.dirname(path.dirname(path.resolve(file))), `${m[1]}.html`));
     const stale = target && fs.existsSync(target) && newerThanFile(file, target);
     return {file, kind: 'skip', note: stale ? `apply가 필요합니다: ${file}의 수정이 ${target}에 아직 없습니다` : null};
   }

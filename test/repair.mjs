@@ -81,6 +81,18 @@ for (const [name, src] of Object.entries(cases)) {
     ok(`${name}: 다시 돌려도 같음`, run('ensure', f).status === 0 && before.equals(fs.readFileSync(f)));
   }
   // 정말 안 보이는 글자는 여전히 잡는다(문서가 숨긴 글을 빼도 투명 글자는 투명이다)
+  // A3: 장표 안쪽이 height:100%로 쪽을 채우는 경우 원래 쪽 요소가 높이 0으로 접히면 안 된다
+  {
+    const body = path.join(OUT, '.doc-kit', 'fill.body.html');
+    fs.mkdirSync(path.dirname(body), {recursive: true});
+    fs.writeFileSync(body, `<style>.shell{position:relative;width:100%;height:100%;overflow:hidden;background:#0c1a2e;color:#fff}.grid{position:absolute;inset:200px 80px}</style>
+<section data-page data-title="표지"><div class="shell"><div class="grid"><h1>꽉 찬 장표 제목</h1><p>본문입니다</p></div></div></section>
+<section data-page data-title="둘째"><div class="shell"><div class="grid"><h2>둘째 쪽</h2><p>본문입니다</p></div></div></section>`);
+    const out = path.join(OUT, 'A3_fill_slide.html');
+    const rb = run('build', body, '-o', out, '--type', 'slide');
+    const cb = run('check', out);
+    ok('A3 height:100%로 쪽을 채우는 장표가 보이고 문서 CSS를 지킴', rb.status === 0 && cb.status === 0 && !rb.stdout.includes('스타일을 버리고') && fs.readFileSync(out, 'utf-8').includes('#0c1a2e'), rb.stdout + rb.stderr + cb.stdout);
+  }
   const f = path.join(OUT, 'R7_투명_글자_그대로_잡음.html');
   fs.writeFileSync(f, plain('<style>h1,p{-webkit-text-fill-color:transparent}</style>', BODY));
   const r = run('ensure', f);
@@ -380,8 +392,14 @@ ok('58 본문 파일과 다시 만든 파일에 data-dk-img가 남지 않음', !
 fs.writeFileSync(ef('body_in.html'), '<section data-page data-title="1장"><p>입력</p></section>');
 run('build', ef('body_in.html'), '-o', ef('body_out.html'));
 const inputs = JSON.parse(fs.readFileSync(path.join(EDGE, '.doc-kit', 'inputs.json'), 'utf-8'));
-const chk = run('check', ef('body_in.html'));
-ok('28 build 입력을 기록하고 check가 결과 파일을 알려 줌', inputs['body_in.html'] === path.resolve(ef('body_out.html')) && chk.stdout.includes('body_out.html'), chk.stdout);
+ok('28 build 입력을 기록함', inputs['body_in.html'] === path.resolve(ef('body_out.html')), JSON.stringify(inputs));
+ok('A3 작업 폴더의 본문 HTML 입력은 build 뒤 .doc-kit/sources/로 옮겨짐', !fs.existsSync(ef('body_in.html')) && fs.readFileSync(path.join(EDGE, '.doc-kit', 'sources', 'body_in.html'), 'utf-8').includes('입력'));
+// .doc-kit 안의 본문 HTML은 옮기지 않는다
+fs.mkdirSync(path.join(EDGE, '.doc-kit'), {recursive: true});
+const kept = path.join(EDGE, '.doc-kit', 'kept.body.html');
+fs.writeFileSync(kept, '<section data-page data-title="1장"><p>남김</p></section>');
+run('build', kept, '-o', ef('kept_out.html'));
+ok('A3 .doc-kit 안의 본문 입력은 그대로 둠', fs.existsSync(kept));
 
 // 3·29·23: 버전
 const fake = plain('', `<h1>${WORD}</h1>`).replace('<html>', '<html data-doc-kit="99.0.0">');
@@ -661,10 +679,11 @@ ok('35 훅: 고친 사본을 덮어쓰지 않고 새 이름으로 내고 알림'
 hook('claude', 'prompt', sid);
 const inb = path.join(proj, 'in_body.html');
 fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각</p></section>');
-run('build', inb, '-o', path.join(proj, 'in_out.html'));
 const inbBefore = fs.readFileSync(inb);
+run('build', inb, '-o', path.join(proj, 'in_out.html'));
+const inbMoved = path.join(proj, '.doc-kit', 'sources', 'in_body.html');
 hook('claude', 'stop', sid);
-ok('28 훅: build 입력 HTML은 2MB 파일로 바뀌지 않음', inbBefore.equals(fs.readFileSync(inb)));
+ok('28 훅: build 입력 HTML은 옮겨진 채 2MB 파일로 바뀌지 않음', !fs.existsSync(inb) && inbBefore.equals(fs.readFileSync(inbMoved)));
 hook('claude', 'prompt', sid);
 const euch = path.join(proj, 'euc_hook.html');
 fs.writeFileSync(euch, Buffer.concat([ASCII('<!doctype html><html><head><meta charset="euc-kr"><title>t</title></head><body><h1>'), HAN, ASCII('</h1></body></html>')]));
@@ -1515,7 +1534,10 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
   {
     const s = session();
     s.prompt();
-    const inb = s.write('body.html', '<section data-page data-title="1장"><p>조각</p></section>');
+    fs.mkdirSync(path.join(s.dir, '.doc-kit'), {recursive: true});
+    const inb = path.join(s.dir, '.doc-kit', 'body.html');
+    fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각</p></section>');
+    s.bash(`cat > ${inb}`);
     const outp = path.join(s.dir, 'result.html');
     spawnSync('node', [CLI, 'build', inb, '-o', outp, '--no-browser'], {encoding: 'utf-8'});
     const size0 = size(inb);
@@ -1524,9 +1546,9 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     s.prompt();
     fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각 고침</p></section>');
     fs.utimesSync(inb, new Date(Date.now() + 2000), new Date(Date.now() + 2000));
-    s.bash('python3 gen.py');
+    s.bash(`cat > ${inb}`);
     const o2 = s.stop();
-    ok('28 입력만 고치고 다시 만들지 않으면 알림', o2.includes('반영하지 않았습니다'), o2);
+    ok('28 입력만 고치고 다시 만들지 않으면 알림', o2.includes('반영하지 않았습니다') || o2.includes('아직 없습니다'), o2);
   }
 
   // 처리 시간이 모자라면 남은 파일을 다음 Stop으로 넘긴다
