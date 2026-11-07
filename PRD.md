@@ -130,6 +130,8 @@ AX2030 장표를 편집용으로 만들면서 뷰어와 편집기가 생겼지�
 
 **격리:** 모델의 CSS는 뷰어를 망치지 못해야 합니다. Shadow DOM만으로는 부족합니다. `* {display:none}`은 부착 요소와 쪽까지 가리기 때문입니다. 모델 CSS를 쪽 범위로 가두고(`@scope` 또는 선택자 접두, `:root`·`body`는 쪽 뿌리로 치환) 키트의 id와 class에 접두를 붙입니다. 방식은 P1-3에서 시험해 고릅니다. 글자 칸과 메모는 일반 DOM에 둡니다.
 
+**고치는 근거:** 훅이 파일을 고치는 근거는 둘뿐이다. (가) 에이전트가 그 경로에 썼다는 직접 증거: 도구의 `file_path`, 또는 셸 명령을 낱말로 나눠 얻은 쓰기 대상(`>`, `>>`, `tee`, `-o`/`--output`, `cp`·`mv`·`rsync` 대상 등). (나) 작업 폴더 스캔에서 이번 턴 구간에 바뀐 파일. 그 밖은 고치지 않고, 이번 턴에 생긴 것으로 보이면 `확인 필요`로 알리기만 한다.
+
 **적용 범위:** 표식 없는 새 HTML이 프로젝트 맨 위나 저장 위치를 정하지 않은 곳에 생기는 경우가 가장 흔하므로, 기본을 "적용"으로 둡니다.
 
 | 파일 | 처리 |
@@ -137,12 +139,13 @@ AX2030 장표를 편집용으로 만들면서 뷰어와 편집기가 생겼지�
 | 이번 작업에서 만들거나 바꾼, 스크립트 없는 HTML | 제자리에서 입힌다. 원본은 `.doc-kit/backup/`에 둔다 |
 | 이번 작업에서 만들거나 바꾼, 자체 스크립트가 있는 HTML | 덮어쓰지 않는다. 옆에 `이름_편집용.html`을 만들고 알린다(`docs/index.html`, 시험 리포트, 빌드 입력 파일 보호) |
 | 웹앱 신호가 있는 곳: 가까운 `package.json`의 프레임워크, 빌드 설정, `node_modules/`·시험 리포트 폴더, 코드 프로젝트 안의 `src/`·`public/`·`dist/`·`build/`·`templates/`·`_build/`·`_site/` 등 | 건드리지 않고 이유를 알린다 |
-| `requirements.txt`·`pyproject.toml`·`Gemfile` 등 안에 서버 웹 프레임워크(flask, django, rails, laravel, spring-boot, gin, axum, phoenix 등)가 있는 프로젝트의, 앱 폴더 밖 HTML | 덮어쓰지 않는다. 옆에 `이름_편집용.html`을 만들고 알린다. jinja2·tornado·sphinx·markupsafe·jupyter·jekyll은 웹앱 신호로 보지 않는다 |
+| `requirements.txt`·`pyproject.toml`·`Gemfile` 등의 의존성 선언 자리에 서버 웹 프레임워크(flask, django, rails, laravel, spring-boot, gin, axum, phoenix 등)가 있는 프로젝트의, 앱 폴더 밖 HTML | 덮어쓰지 않는다. 옆에 `이름_편집용.html`을 만들고 알린다. 이름은 requirements 줄 첫머리, pyproject `dependencies`·`optional-dependencies` 배열, Cargo `[dependencies]` 키, `gem '이름'`, go.mod `require`, composer `require` 키, pom·gradle 좌표에서만 찾고 설명·주석은 보지 않는다. jinja2·tornado·sphinx·markupsafe·jupyter·jekyll·aiohttp는 웹앱 신호로 보지 않는다 |
 | 언어 프로젝트 파일(`requirements.txt`, `Cargo.toml`, `pom.xml` 등)만 있는 저장소, 프로젝트 신호가 없는 폴더의 `emails/`·`site/` 등 | 문서로 보고 제자리에서 입힌다 |
 | 프로젝트 설정에서 제외한 경로 | 건드리지 않는다 |
 | `<meta name="doc-kit" content="off">` | 건드리지 않고 `check`는 "제외됨"으로 보고한다. 끝날 때 사용자에게 보여 준다. 사용자 전용이며 스킬 문서에는 적지 않는다 |
 | 작업 폴더 밖에 Bash로 쓴 파일 | 찾지 못할 수 있다(한계) |
-| 명령 글자에 폴더가 나오지 않은 스크립트가 바탕화면·다운로드·문서 폴더에 쓴 HTML | 사용자가 받은 파일이 섞이므로 고치지 않고 `확인 필요`로 알린다 |
+| 바탕화면·다운로드·문서 폴더의 HTML | 에이전트가 그 경로에 썼다는 직접 증거(도구의 `file_path`, 리디렉션·`tee`·`-o`·`cp`·`mv` 대상)가 있을 때만 입힌다. 명령 글자에 폴더 이름이 나오는 것만으로는 훑지 않는다. 스크립트를 돌린 턴에 바로 아래에서 바뀐 HTML은 사용자가 받은 파일이 섞이므로 고치지 않고 `확인 필요`로 알린다 |
+| 중단된 턴의 마지막 도구 사용 뒤부터 다음 요청 사이에 작업 폴더에서 바뀐 HTML | 사용자가 턴 사이에 저장한 파일일 수 있어 고치지 않고 `확인 필요`로 알린다. 마지막 도구 사용까지의 구간은 다음 끝날 때 처리한다 |
 | 스캔으로 찾은, git HEAD와 같은 HTML | 이번 턴에 이 저장소에서 `git commit`으로 만든 커밋(작성·커미터 시각 모두 이번 턴)이면 입히고, rebase·pull·checkout으로 바뀐 것은 건너뛰고 알린다 |
 
 **한계:** 다음 경우는 보장하지 못합니다.

@@ -12499,17 +12499,93 @@ var SCAN_SKIP = /* @__PURE__ */ new Set([...SYSTEM_DIRS, "Library", "AppData", "
 var WEB_DEPS = /* @__PURE__ */ new Set(["react", "vue", "svelte", "next", "nuxt", "vite", "webpack", "astro", "gatsby", "parcel", "solid-js", "remix", "electron", "express", "koa", "fastify", "hono", "preact", "lit", "tailwindcss", "ember-source", "vuepress", "vitepress", "hexo", "nest", "polka", "restify", "hapi"]);
 var WEB_DEP_SCOPES = /^@(angular|sveltejs|11ty|remix-run|nestjs|docusaurus|hono|hapi|nuxt|tanstack)\//;
 var BUILD_CONFIG = /^(?:(?:vite|vitest|next|nuxt|astro|webpack|svelte|remix|rollup|parcel|gatsby|tailwind|eleventy|quasar|vue|docusaurus|rspack|rsbuild)\.config\.[cm]?[jt]sx?|\.eleventy\.[cm]?js|angular\.json|manage\.py|mkdocs\.ya?ml|_config\.ya?ml|hugo\.(?:toml|ya?ml|json)|artisan|vercel\.json|netlify\.toml|firebase\.json)$/;
+var PY_WEB = /* @__PURE__ */ new Set(["flask", "django", "fastapi", "starlette", "bottle", "pyramid", "sanic", "quart", "falcon", "cherrypy", "litestar"]);
+var pyName = (s) => /^\s*([A-Za-z0-9][A-Za-z0-9._-]*)/.exec(s)?.[1] ?? "";
+var pyWeb = (names) => names.map(pyName).find((n) => PY_WEB.has(n.toLowerCase().replace(/[._]+/g, "-")));
+var quoted = (s) => [...s.matchAll(/"((?:[^"\\]|\\.)*)"|'([^']*)'/g)].map((m) => m[1] ?? m[2]);
+function tomlEntries(text) {
+  const out = [];
+  const lines = text.split(/\r?\n/);
+  let table = "";
+  const depth = (s) => {
+    let d = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c2 = s[i];
+      if (c2 === '"' || c2 === "'") {
+        const j2 = s.indexOf(c2, i + 1);
+        i = j2 < 0 ? s.length : j2;
+      } else if (c2 === "#") break;
+      else if (c2 === "[" || c2 === "{") d++;
+      else if (c2 === "]" || c2 === "}") d--;
+    }
+    return d;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    const h = /^\s*\[\[?\s*([^\]]+?)\s*\]\]?\s*(?:#.*)?$/.exec(lines[i]);
+    if (h) {
+      table = h[1].replace(/["'\s]/g, "");
+      continue;
+    }
+    const kv = /^\s*("[^"]*"|'[^']*'|[\w.-]+)\s*=\s*(.*)$/.exec(lines[i]);
+    if (!kv) continue;
+    let value = kv[2];
+    for (let d = depth(value); d > 0 && i + 1 < lines.length; d = depth(value)) value += "\n" + lines[++i];
+    out.push({ table, key: kv[1].replace(/^["']|["']$/g, ""), value });
+  }
+  return out;
+}
+var tomlStrings = (value) => quoted(value.replace(/#[^\n"']*$/gm, ""));
+var GO_WEB = ["gin-gonic", "labstack/echo", "gofiber", "go-chi", "gorilla/mux", "beego", "revel", "gobuffalo"];
+var RUST_WEB = /* @__PURE__ */ new Set(["actix-web", "axum", "rocket", "warp", "tide", "poem", "leptos"]);
+var RUBY_WEB = /* @__PURE__ */ new Set(["rails", "sinatra", "hanami", "roda", "padrino"]);
+var PHP_WEB = /^(?:laravel\/(?:framework|lumen-framework)|symfony\/(?:framework-bundle|http-kernel)|slim\/slim|cakephp\/cakephp|yiisoft\/yii2|codeigniter4?\/framework|laminas\/laminas-mvc)$/i;
+var JVM_WEB = /^(?:spring-boot-starter-web(?:flux)?|spring-web(?:mvc|flux)?|quarkus-[\w.-]+|micronaut-[\w.-]+|jakarta\.servlet-api|javax\.servlet-api)$/;
+var JVM_PLUGIN = /^(?:org\.springframework\.boot|io\.quarkus|io\.micronaut\.[\w.-]+)$/;
+var ELIXIR_WEB = /* @__PURE__ */ new Set(["phoenix", "plug", "plug_cowboy"]);
 var LANG_FILES = [
-  [/^(?:requirements[\w.-]*\.txt|pyproject\.toml|setup\.py|setup\.cfg|Pipfile)$/, ["flask", "django", "fastapi", "starlette", "bottle", "pyramid", "sanic", "aiohttp", "quart", "falcon", "cherrypy", "litestar"]],
-  [/^Gemfile$/, ["rails", "sinatra", "hanami", "roda", "padrino"]],
-  [/^go\.mod$/, ["gin-gonic", "labstack/echo", "gofiber", "go-chi", "gorilla/mux", "beego", "revel", "gobuffalo"]],
-  [/^composer\.json$/, ["laravel", "symfony/framework-bundle", "symfony/http-kernel", "slim/slim", "cakephp", "yiisoft", "codeigniter", "laminas"]],
-  [/^Cargo\.toml$/, ["actix-web", "axum", "rocket", "warp", "tide", "poem", "leptos"]],
-  [/^(?:pom\.xml|build\.gradle(?:\.kts)?)$/, ["spring-boot", "spring-webmvc", "quarkus", "micronaut", "jakarta.servlet", "javax.servlet"]],
-  [/^mix\.exs$/, ["phoenix", "plug"]]
-].map(([re2, names]) => [re2, new RegExp(`(?:^|[^\\w-])(${names.map((n) => n.replace(/[.]/g, "\\.")).join("|")})(?!\\w)`, "im")]);
+  [/^requirements[\w.-]*\.txt$/, (t) => pyWeb(t.split(/\r?\n/).filter((l) => /^\s*[A-Za-z0-9]/.test(l)))],
+  [/^pyproject\.toml$/, (t) => {
+    const e = tomlEntries(t);
+    const pep = e.filter((x2) => x2.table === "project" && x2.key === "dependencies" || x2.table === "project.optional-dependencies").flatMap((x2) => tomlStrings(x2.value));
+    const poetry = e.filter((x2) => x2.table === "tool.poetry.dependencies").map((x2) => x2.key);
+    return pyWeb([...pep, ...poetry]);
+  }],
+  [/^Pipfile$/, (t) => pyWeb(tomlEntries(t).filter((x2) => x2.table === "packages").map((x2) => x2.key))],
+  [/^setup\.py$/, (t) => pyWeb([...t.matchAll(/install_requires\s*=\s*\[([^\]]*)\]/g)].flatMap((m) => quoted(m[1])))],
+  [/^setup\.cfg$/, (t) => {
+    const m = /^install_requires\s*=([^\n]*(?:\n[ \t]+[^\n]*)*)/m.exec(t);
+    return m && pyWeb(m[1].split("\n").map((l) => l.replace(/#.*/, "").trim()).filter(Boolean));
+  }],
+  [/^Cargo\.toml$/, (t) => {
+    const deps = (tb) => tb === "dependencies" || tb === "workspace.dependencies" || /^target\..+\.dependencies$/.test(tb);
+    const names = tomlEntries(t).filter((x2) => deps(x2.table)).map((x2) => x2.key);
+    for (const m of t.matchAll(/^\s*\[\s*(?:workspace\.|target\.[^\]]+\.)?dependencies\.([\w-]+)\s*\]/gm)) names.push(m[1]);
+    return names.find((n) => RUST_WEB.has(n));
+  }],
+  [/^Gemfile$/, (t) => [...t.matchAll(/^\s*gem\s+['"]([\w-]+)['"]/gm)].map((m) => m[1]).find((n) => RUBY_WEB.has(n))],
+  [/^go\.mod$/, (t) => {
+    const paths2 = [];
+    for (const m of t.matchAll(/^\s*require\s*\(([\s\S]*?)^\s*\)/gm)) m[1].split("\n").forEach((l) => paths2.push(l.trim().split(/\s+/)[0]));
+    for (const m of t.matchAll(/^\s*require\s+([^\s(]+)/gm)) paths2.push(m[1]);
+    return paths2.find((p) => p && GO_WEB.some((n) => new RegExp(`(?:^|/)${n}(?:/|$)`).test(p)));
+  }],
+  [/^composer\.json$/, (t) => {
+    try {
+      return Object.keys(JSON.parse(t).require || {}).find((k) => PHP_WEB.test(k));
+    } catch {
+      return null;
+    }
+  }],
+  [/^pom\.xml$/, (t) => [...t.replace(/<!--[\s\S]*?-->/g, "").matchAll(/<artifactId>\s*([\w.-]+)\s*<\/artifactId>/g)].map((m) => m[1]).find((a3) => JVM_WEB.test(a3))],
+  [/^build\.gradle(?:\.kts)?$/, (t) => {
+    const s = t.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, "");
+    const coords = [...s.matchAll(/['"]([\w.-]+):([\w.-]+)(?::[^'"]*)?['"]/g)].map((m) => `${m[1]}:${m[2]}`);
+    const plugins = [...s.matchAll(/\bid\s*\(?\s*['"]([\w.-]+)['"]/g)].map((m) => m[1]);
+    return coords.find((c2) => JVM_WEB.test(c2.split(":")[1])) || plugins.find((p) => JVM_PLUGIN.test(p));
+  }],
+  [/^mix\.exs$/, (t) => [...t.matchAll(/\{\s*:(\w+)\s*,/g)].map((m) => m[1]).find((n) => ELIXIR_WEB.has(n))]
+];
 var OUTSIDE_DIRS = ["Desktop", "Downloads", "Documents"];
-var OUTSIDE_RE = /(?:^|[^\w.-])(Desktop|Downloads|Documents)(?=$|[/\s'"`;|&)])/g;
 var SCAN_FILES_MAX = 5;
 var SCAN_ENTRIES_MAX = 2e4;
 var SKIP_NOTES_MAX = 8;
@@ -12642,13 +12718,9 @@ var READ_ONLY = /* @__PURE__ */ new Set(["ls", "cat", "head", "tail", "less", "m
 var READ_ONLY_GIT = /* @__PURE__ */ new Set(["status", "log", "diff", "show", "branch", "remote", "rev-parse", "ls-files", "blame", "describe"]);
 var SHELL_WORDS = /* @__PURE__ */ new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "}", "sudo", "command", "nohup", "time", "env", "exec", "export"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
-function outsideDirsOf(cmd2) {
-  if (/\.html?\b/i.test(cmd2)) return new Set(OUTSIDE_DIRS);
-  return new Set([...cmd2.matchAll(OUTSIDE_RE)].map((m) => m[1]));
-}
 function readShell(cmd2, cwd) {
   const home = HOME();
-  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), outside: outsideDirsOf(cmd2), ran: false };
+  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), ran: false };
   const vars = { HOME: home };
   let dir = cwd;
   const expand = (w2) => {
@@ -12740,7 +12812,7 @@ function readShell(cmd2, cwd) {
 }
 function effectsOf(i) {
   const cwd = cwdOf(i);
-  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), outside: /* @__PURE__ */ new Set(), ran: false };
+  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), ran: false };
   const add = (p) => {
     if (typeof p === "string" && isHtml(p)) out.written.add(path5.resolve(cwd, p.replace(/^~(?=\/)/, HOME())));
   };
@@ -12753,7 +12825,7 @@ function effectsOf(i) {
       continue;
     }
     const r = readShell(text, cwd);
-    for (const k of ["written", "removed", "dirs", "unknown", "outside"]) r[k].forEach((v) => out[k].add(v));
+    for (const k of ["written", "removed", "dirs", "unknown"]) r[k].forEach((v) => out[k].add(v));
     out.ran ||= r.ran;
   }
   return out;
@@ -12854,9 +12926,9 @@ function projectSignals(file, cwd) {
     for (const n of res.app || web ? [] : names) {
       const rule = LANG_FILES.find(([re2]) => re2.test(n));
       if (!rule) continue;
-      const m = rule[1].exec(readHead(path5.join(d, n)));
+      const m = rule[1](readHead(path5.join(d, n)));
       if (m) {
-        web = `\uC6F9 \uD504\uB808\uC784\uC6CC\uD06C ${m[1]}(${n})`;
+        web = `\uC6F9 \uD504\uB808\uC784\uC6CC\uD06C ${m}(${n})`;
         break;
       }
       project ||= n;
@@ -12991,22 +13063,33 @@ async function runStop(state, cwd) {
   if (missing.length) extra.push(`\uAE30\uB85D\uB41C \uD30C\uC77C\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4(\uC62E\uACBC\uAC70\uB098 \uC9C0\uC6E0\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4): ${missing.slice(0, SKIP_NOTES_MAX).join(", ")}. \uC62E\uACBC\uB2E4\uBA74 \uC0C8 \uC704\uCE58\uC5D0\uC11C ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
   const scanned = /* @__PURE__ */ new Set();
   for (const d of new Set(ranges.map((r) => r.cwd).filter(Boolean))) if (!isHomeOrRoot(d)) scan(d, fresh).forEach((p) => scanned.add(p));
-  if (state.outsideSince) {
-    const outFresh = (ms) => ms >= state.outsideSince - 1500 && fresh(ms);
-    for (const d of state.outsideDirs || OUTSIDE_DIRS) scanShallow(path5.join(HOME(), d), outFresh).forEach((p) => scanned.add(p));
+  const isKitFile = (p) => {
+    try {
+      return fs6.readFileSync(p, "latin1").includes("data-doc-kit=");
+    } catch {
+      return true;
+    }
+  };
+  const late = /* @__PURE__ */ new Set();
+  for (const g of state.gaps || []) {
+    if (!g.cwd || !g.next || isHomeOrRoot(g.cwd)) continue;
+    const lateFresh = (ms) => ms > g.to + 1500 && ms <= g.next && !fresh(ms);
+    for (const p of scan(g.cwd, lateFresh)) {
+      const st2 = statOf(p);
+      if (scanned.has(p) || !st2 || already(p, st2) || isKitFile(p) || excludedByConfig(p) || projectSignals(p, cwd).app) continue;
+      late.add(p);
+    }
   }
+  const lateList = [...late].filter((p) => !explicit.includes(p));
+  lateList.slice(0, SKIP_NOTES_MAX).forEach((p) => extra.push(`\uD655\uC778 \uD544\uC694: ${p} (\uC911\uB2E8\uB41C \uC791\uC5C5\uC758 \uB9C8\uC9C0\uB9C9 \uB3C4\uAD6C \uC0AC\uC6A9 \uB4A4\uC5D0 \uBC14\uB010 HTML\uC774\uB77C \uC0AC\uC6A9\uC790\uAC00 \uC800\uC7A5\uD55C \uD30C\uC77C\uC77C \uC218 \uC788\uC5B4 \uADF8\uB300\uB85C \uB450\uC5C8\uC2B5\uB2C8\uB2E4. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)`));
+  if (lateList.length > SKIP_NOTES_MAX) extra.push(`\uD655\uC778 \uD544\uC694: \uC911\uB2E8\uB41C \uC791\uC5C5 \uB4A4\uC5D0 \uBC14\uB010 HTML ${lateList.length - SKIP_NOTES_MAX}\uAC1C \uB354`);
   for (const d of state.dirs || []) (isHomeOrRoot(d) ? scanShallow(d, fresh) : scan(d, fresh)).forEach((p) => scanned.add(p));
   if (state.scriptSince) {
     const scriptFresh = (ms) => ms >= state.scriptSince - 1500 && fresh(ms);
-    const seen = /* @__PURE__ */ new Set([...scanned, ...explicit]);
+    const seen = /* @__PURE__ */ new Set([...scanned, ...explicit, ...late]);
     const looks = OUTSIDE_DIRS.flatMap((d) => scanShallow(path5.join(HOME(), d), scriptFresh)).filter((p) => {
       const st2 = statOf(p);
-      if (seen.has(p) || !st2 || already(p, st2)) return false;
-      try {
-        return !fs6.readFileSync(p, "latin1").includes("data-doc-kit=");
-      } catch {
-        return false;
-      }
+      return !seen.has(p) && st2 && !already(p, st2) && !isKitFile(p);
     });
     looks.slice(0, SKIP_NOTES_MAX).forEach((p) => extra.push(`\uD655\uC778 \uD544\uC694: ${p} (\uC774\uBC88 \uC791\uC5C5 \uC911 \uC0DD\uAE34 HTML\uB85C \uBCF4\uC774\uB098 \uC0AC\uC6A9\uC790 \uD3F4\uB354\uB77C \uADF8\uB300\uB85C \uB450\uC5C8\uC2B5\uB2C8\uB2E4. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)`));
     if (looks.length > SKIP_NOTES_MAX) extra.push(`\uD655\uC778 \uD544\uC694: \uC0AC\uC6A9\uC790 \uD3F4\uB354\uC758 HTML ${looks.length - SKIP_NOTES_MAX}\uAC1C \uB354`);
@@ -13086,11 +13169,11 @@ async function hook(agent, event) {
         const gaps = (s.gaps || []).filter((g) => g.to >= now - STALE_MS);
         if (s.open && s.start) {
           const to = Math.max(s.lastPost ?? 0, s.turnAt ?? s.start);
-          if (to >= now - STALE_MS) gaps.push({ from: s.start, to, cwd: s.cwd });
+          if (to >= now - STALE_MS) gaps.push({ from: s.start, to, next: now, cwd: s.cwd });
         }
         const keep = gaps.length > 0;
         const paths2 = s.paths || [];
-        store(f, { ...s, start: now, turnAt: now, cwd, open: true, lastPost: null, gaps: gaps.slice(-5), paths: paths2, pathsStart: paths2.length ? s.pathsStart ?? s.start : null, dirs: keep ? s.dirs : [], outsideDirs: keep ? s.outsideDirs : [], outsideSince: keep ? s.outsideSince : null, scriptSince: keep ? s.scriptSince : null });
+        store(f, { ...s, start: now, turnAt: now, cwd, open: true, lastPost: null, gaps: gaps.slice(-5), paths: paths2, pathsStart: paths2.length ? s.pathsStart ?? s.start : null, dirs: keep ? s.dirs : [], scriptSince: keep ? s.scriptSince : null });
       }
     } else if (event === "post") {
       const s = load(f) || { start: Date.now(), cwd: cwdOf(input), paths: [] };
@@ -13099,10 +13182,6 @@ async function hook(agent, event) {
       s.paths = merge(s.paths, e.written).filter((p) => !e.removed.has(p) || e.written.has(p));
       if (e.dirs.size) s.dirs = merge(s.dirs, e.dirs);
       if (e.unknown.size) s.unknown = merge(s.unknown, e.unknown).slice(0, 10);
-      if (e.outside.size) {
-        s.outsideDirs = merge(s.outsideDirs, e.outside);
-        s.outsideSince ||= s.turnAt ?? s.start;
-      }
       if (e.ran) s.scriptSince ||= s.turnAt ?? s.start;
       s.lastPost = Date.now();
       store(f, s);
