@@ -54,7 +54,7 @@
 | P1-4~P1-7 | 끝 | `src/kit/`, `src/cli/`, `tools/bundle.mjs`. `npm test` 전체 통과 |
 | P1-8 | 끝 | `skill/html-doc-kit/SKILL.md` |
 | P1-9 | 끝 | 전역 설치와 `doctor` 정상. Codex 훅은 사용자가 Codex에서 한 번 승인해야 돈다 |
-| P1-10 | 일부 | Codex만 실행(아래 부록 결과). Claude Code·Cursor는 CLI 로그인이 필요하다 |
+| P1-10 | 일부 | Codex(훅 승인 뒤)·Claude Code는 11건 모두 통과. Cursor CLI는 통과 못 함(아래 부록). Cursor 앱(IDE)은 직접 확인 필요 |
 | P1-11 | 일부 | 독립 검증 5회(지적 58건과 후속 문제를 고치고 재확인). A8(Safari·Windows)과 사용자 시험은 남음 |
 
 
@@ -151,5 +151,18 @@ P2-1 결과가 나쁘면 범위를 줄이거나 멈춥니다. 2단계의 의존�
 | 12 | 안 돌림 | 실제 사용자 바탕화면에 쓰는 요청이라 자동 시험에서 뺐다 |
 
 남는 것: Codex 샌드박스 안에서는 브라우저를 띄우지 못해 모델이 돌린 `check`의 C6이 "미실행"이었다. 3번의 빈 화면도 그래서 모델 쪽에서 놓쳤다. SKILL에 "미실행이면 사용자에게 알리고 브라우저로 확인을 부탁"을 넣었다. Codex 훅 승인 뒤에는 훅이 샌드박스 밖에서 C6을 돌린다. Claude Code와 Cursor는 CLI 로그인이 풀려 있어 돌리지 못했다.
+
+### 결과(2026-11-08, 훅 승인 뒤 세 에이전트)
+
+| 에이전트 | 모델·명령 | 결과 |
+|---|---|---|
+| Codex | 위와 같음. 사용자가 Codex에서 훅 세 개를 승인한 뒤 | 11건 모두 통과(첫 실행) |
+| Claude Code | `claude -p "<요청>" --model haiku --permission-mode acceptEdits --allowedTools "Bash(node:*),Bash(python3:*),Bash(ls:*),Bash(cat:*),Write,Edit,Read,Glob,Grep,Skill"` | 11건 모두 통과(첫 실행) |
+| Cursor | `agent -p "<요청>" --model gpt-5-mini --output-format text --workspace <빈 폴더> --trust` (`--force` 안 씀) | 통과 못 함. 아래 참고 |
+
+Cursor CLI에서 확인한 것:
+- `-p` 실행에서는 사용자 훅(`~/.cursor/hooks.json`)이 전혀 돌지 않았다. 프로젝트 훅은 폴더 신뢰 뒤 `afterFileEdit`만 돌고 `beforeSubmitPrompt`·`stop`은 돌지 않았다. 그래서 CLI에서는 3겹(Stop 훅) 안전장치가 없다.
+- 낮은 등급 모델이 사용자 환경의 다른 스킬(brainstorming)로 들어가 되묻거나, HTML을 파일로 쓰지 않고 대화창에 출력했다. 파일을 쓴 경우(6번)는 키트 없이 남았다. 10번에서 응답 없이 멈춰 거기서 끊었다.
+- Cursor 앱(IDE)에서 훅이 도는지는 CLI로 확인할 수 없다. 사용자가 앱에서 HTML 문서를 하나 시켜 확인해야 한다.
 
 웹앱 오작동 시험(A6)은 별도로 합니다: React 프로젝트의 `public/index.html` 제목 변경, 스크립트가 있는 `docs/index.html` 수정, 시험 리포트 생성, 빌드 산출물 생성.
