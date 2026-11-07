@@ -95,8 +95,13 @@ function paths(home) {
 const HOOK_EVENTS = {
   claude: ['UserPromptSubmit', 'PostToolUse', 'Stop'],
   codex: ['UserPromptSubmit', 'PostToolUse', 'Stop'],
-  cursor: ['beforeSubmitPrompt', 'afterFileEdit', 'afterShellExecution', 'stop'],
+  cursor: ['beforeSubmitPrompt', 'afterFileEdit', 'afterShellExecution', 'stop', 'sessionStart', 'sessionEnd'],
 };
+// Cursor 이벤트와 doc-kit 훅 처리 이름. Cursor CLI의 -p(print) 실행에서는 beforeSubmitPrompt·stop이 오지 않고
+// sessionStart·afterFileEdit·afterShellExecution·sessionEnd는 온다. 그래서 세션 시작·끝에도 같은 처리를 건다
+const CURSOR_HOOKS = [['beforeSubmitPrompt', 'prompt'], ['afterFileEdit', 'post'], ['afterShellExecution', 'post'], ['stop', 'stop'], ['sessionStart', 'start'], ['sessionEnd', 'end']];
+// Cursor 지침에만 덧붙인다. Cursor CLI는 승인 목록 밖의 셸 명령을 거절해 build를 못 하는 일이 있다
+const CURSOR_EXTRA = `- HTML 코드를 대화창에 출력하지 말고 작업 폴더의 파일로 쓴다. 셸 명령이 거절돼 build를 못 하면 묻지 말고 완성 HTML 파일을 직접 쓴다. 작업이 끝날 때 훅이 뷰어·편집기를 넣는다.`;
 const hookFile = (p, a) => ({claude: p.claudeSettings, codex: p.codexHooks, cursor: p.cursorHooks})[a];
 const instructionFile = (p, a) => ({claude: p.claudeMd, codex: p.codexMd, cursor: p.cursorRule})[a];
 const skillDir = (p, a) => (a === 'claude' ? p.claudeSkill : p.agentsSkill);
@@ -165,12 +170,12 @@ export function install({home = os.homedir(), agents = ALL_AGENTS} = {}) {
     const c = readJson(p.cursorHooks, {version: 1, hooks: {}});
     c.version = c.version || 1;
     c.hooks = c.hooks || {};
-    for (const [event, name] of [['beforeSubmitPrompt', 'prompt'], ['afterFileEdit', 'post'], ['afterShellExecution', 'post'], ['stop', 'stop']]) {
+    for (const [event, name] of CURSOR_HOOKS) {
       c.hooks[event] = [...stripOurs(c.hooks[event]), {command: cmd('cursor', name)}];
     }
     writeJson(p.cursorHooks, c);
     fs.mkdirSync(path.dirname(p.cursorRule), {recursive: true});
-    fs.writeFileSync(p.cursorRule, `---\ndescription: HTML 문서를 만들 때 html-doc-kit을 쓴다\nalwaysApply: true\n---\n${rules(p.bin)}\n`);
+    fs.writeFileSync(p.cursorRule, `---\ndescription: HTML 문서를 만들 때 html-doc-kit을 쓴다\nalwaysApply: true\n---\n${rules(p.bin)}\n${CURSOR_EXTRA}\n`);
     done.push(AGENT_NAMES.cursor);
   }
   return done;

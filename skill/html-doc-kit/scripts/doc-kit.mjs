@@ -12360,8 +12360,10 @@ function paths(home) {
 var HOOK_EVENTS = {
   claude: ["UserPromptSubmit", "PostToolUse", "Stop"],
   codex: ["UserPromptSubmit", "PostToolUse", "Stop"],
-  cursor: ["beforeSubmitPrompt", "afterFileEdit", "afterShellExecution", "stop"]
+  cursor: ["beforeSubmitPrompt", "afterFileEdit", "afterShellExecution", "stop", "sessionStart", "sessionEnd"]
 };
+var CURSOR_HOOKS = [["beforeSubmitPrompt", "prompt"], ["afterFileEdit", "post"], ["afterShellExecution", "post"], ["stop", "stop"], ["sessionStart", "start"], ["sessionEnd", "end"]];
+var CURSOR_EXTRA = `- HTML \uCF54\uB4DC\uB97C \uB300\uD654\uCC3D\uC5D0 \uCD9C\uB825\uD558\uC9C0 \uB9D0\uACE0 \uC791\uC5C5 \uD3F4\uB354\uC758 \uD30C\uC77C\uB85C \uC4F4\uB2E4. \uC178 \uBA85\uB839\uC774 \uAC70\uC808\uB3FC build\uB97C \uBABB \uD558\uBA74 \uBB3B\uC9C0 \uB9D0\uACE0 \uC644\uC131 HTML \uD30C\uC77C\uC744 \uC9C1\uC811 \uC4F4\uB2E4. \uC791\uC5C5\uC774 \uB05D\uB0A0 \uB54C \uD6C5\uC774 \uBDF0\uC5B4\xB7\uD3B8\uC9D1\uAE30\uB97C \uB123\uB294\uB2E4.`;
 var hookFile = (p, a3) => ({ claude: p.claudeSettings, codex: p.codexHooks, cursor: p.cursorHooks })[a3];
 var instructionFile = (p, a3) => ({ claude: p.claudeMd, codex: p.codexMd, cursor: p.cursorRule })[a3];
 var skillDir = (p, a3) => a3 === "claude" ? p.claudeSkill : p.agentsSkill;
@@ -12425,7 +12427,7 @@ function install({ home = os3.homedir(), agents = ALL_AGENTS } = {}) {
     const c2 = readJson2(p.cursorHooks, { version: 1, hooks: {} });
     c2.version = c2.version || 1;
     c2.hooks = c2.hooks || {};
-    for (const [event, name] of [["beforeSubmitPrompt", "prompt"], ["afterFileEdit", "post"], ["afterShellExecution", "post"], ["stop", "stop"]]) {
+    for (const [event, name] of CURSOR_HOOKS) {
       c2.hooks[event] = [...stripOurs(c2.hooks[event]), { command: cmd2("cursor", name) }];
     }
     writeJson2(p.cursorHooks, c2);
@@ -12435,6 +12437,7 @@ description: HTML \uBB38\uC11C\uB97C \uB9CC\uB4E4 \uB54C html-doc-kit\uC744 \uC4
 alwaysApply: true
 ---
 ${rules(p.bin)}
+${CURSOR_EXTRA}
 `);
     done.push(AGENT_NAMES.cursor);
   }
@@ -13353,12 +13356,26 @@ async function hook(agent, event) {
       if (e.active) s.active = true;
       s.lastPost = Date.now();
       store(f, s);
-    } else if (event === "stop") {
-      const s = load(f) || { start: Date.now() - 6e5, paths: [] };
+    } else if (event === "start") {
+      if (!load(f)) {
+        const now = Date.now();
+        store(f, { start: now, turnAt: now, cwd: cwdOf(input), paths: [], open: true, active: false });
+      }
+    } else if (event === "stop" || event === "end") {
+      const loaded = load(f);
+      if (event === "end" && (!loaded || loaded.open === false)) {
+        process.stdout.write("{}");
+        return;
+      }
+      const s = loaded || { start: Date.now() - 6e5, paths: [] };
       const cwd = s.cwd || cwdOf(input);
       const { lines, urgent, failed, pending, handled } = await runStop(s, cwd);
       store(f, pending.length ? { ...s, cwd, open: false, gaps: [], paths: pending, unknown: [], maybe: [], notes: [], done: { ...s.done, ...handled } } : { start: Date.now(), turnAt: s.turnAt, cwd, open: false, active: false, paths: [], done: handled });
       if (lines.length) note(lines.join(" / "));
+      if (event === "end") {
+        process.stdout.write("{}");
+        return;
+      }
       if (lines.length) {
         const message = "html-doc-kit: " + lines.join("\n");
         if (agent === "cursor") {

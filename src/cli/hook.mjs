@@ -944,13 +944,32 @@ export async function hook(agent, event) {
       if (e.active) s.active = true;
       s.lastPost = Date.now();
       store(f, s);
-    } else if (event === 'stop') {
-      const s = load(f) || {start: Date.now() - 600000, paths: []};
+    } else if (event === 'start') {
+      // 세션 시작(Cursor sessionStart). prompt 훅이 오지 않는 실행(Cursor CLI의 -p)에서 기준 시각을 잡는다.
+      // 이미 기록이 있으면(대화형에서 prompt가 먼저 온 경우 등) 건드리지 않는다
+      if (!load(f)) {
+        const now = Date.now();
+        store(f, {start: now, turnAt: now, cwd: cwdOf(input), paths: [], open: true, active: false});
+      }
+    } else if (event === 'stop' || event === 'end') {
+      // end: 세션 끝(Cursor sessionEnd). stop이 오지 않는 실행(Cursor CLI의 -p)에서 같은 복구를 한다.
+      // stop이 이미 처리했으면(open:false) 또는 이 세션에 기록이 없으면 아무것도 하지 않는다.
+      // 결과를 모델이나 사용자에게 넘길 길이 없어 hook.log에만 남긴다
+      const loaded = load(f);
+      if (event === 'end' && (!loaded || loaded.open === false)) {
+        process.stdout.write('{}');
+        return;
+      }
+      const s = loaded || {start: Date.now() - 600000, paths: []};
       const cwd = s.cwd || cwdOf(input);
       const {lines, urgent, failed, pending, handled} = await runStop(s, cwd);
       // 모두 처리한 뒤에야 기준 시각을 옮긴다. 처리 못 한 파일이 있으면 그대로 두어 다음에 다시 찾는다
       store(f, pending.length ? {...s, cwd, open: false, gaps: [], paths: pending, unknown: [], maybe: [], notes: [], done: {...s.done, ...handled}} : {start: Date.now(), turnAt: s.turnAt, cwd, open: false, active: false, paths: [], done: handled});
       if (lines.length) note(lines.join(' / '));
+      if (event === 'end') {
+        process.stdout.write('{}');
+        return;
+      }
       if (lines.length) {
         const message = 'html-doc-kit: ' + lines.join('\n');
         if (agent === 'cursor') {
