@@ -2,3 +2,5 @@ node_modules/
 .DS_Store
 .doc-kit/
 *.tmp
+src/cli/assets.gen.mjs
+test/out/

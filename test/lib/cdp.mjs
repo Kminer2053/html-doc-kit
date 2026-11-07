@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
 
-const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const CHROME = process.env.DOC_KIT_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function open(width = 1920, height = 1166) {
@@ -39,7 +39,13 @@ export async function open(width = 1920, height = 1166) {
   const send = (method, params = {}) =>
     new Promise((resolve, reject) => {
       const id = ++seq;
-      pending.set(id, {resolve, reject});
+      // 응답이 없으면 시험 전체가 멈추지 않고 그 시험만 실패하게 한다
+      const timer = setTimeout(() => {
+        pending.delete(id);
+        reject(new Error(`CDP 응답 없음: ${method} ${String(params.expression || '').slice(0, 120)}`));
+      }, 60000);
+      timer.unref();
+      pending.set(id, {resolve: (v) => (clearTimeout(timer), resolve(v)), reject: (e) => (clearTimeout(timer), reject(e))});
       ws.send(JSON.stringify({id, method, params}));
     });
   const ev = async (expression) => {

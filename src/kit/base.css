@@ -1,0 +1,15 @@
+/* 문서에 자체 스타일이 없을 때만 쓰는 기본 모양 */
+:where(#dk-document[data-dk-plain] .dk-page-inner){font:16px/1.6 DocKitFull,'Noto Sans KR','Noto Sans CJK KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#182d42;padding:56px 64px}
+:where(#dk-document[data-dk-plain] .dk-page[data-dk-size=slide] .dk-page-inner){font-size:28px;padding:72px 96px}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1){font-size:1.9em;line-height:1.25;margin:0 0 .6em;color:#123451}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h2){font-size:1.4em;line-height:1.3;margin:1.1em 0 .5em;color:#1b5790}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h3){font-size:1.15em;margin:1em 0 .4em;color:#1b5790}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(p){margin:0 0 .8em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(ul,ol){margin:0 0 .8em;padding-left:1.5em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(table){border-collapse:collapse;width:100%;margin:0 0 1em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th,td){border:1px solid #9dabb8;padding:.4em .6em;vertical-align:top}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th){background:#123451;color:#fff;text-align:left}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(img,svg){max-width:100%;height:auto}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(blockquote){margin:0 0 .8em;padding:.4em 1em;border-left:4px solid #1887ae;background:#eef5fa}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(code){font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:#eef2f6;padding:.1em .3em;border-radius:3px}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre){background:#eef2f6;padding:1em;overflow:auto}
