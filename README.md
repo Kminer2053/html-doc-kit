@@ -76,6 +76,9 @@ upgrade <파일.html>                키트를 최신으로
 - 코드 프로젝트의 `build/`, `dist/`, `public/` 같은 앱 폴더에 생긴 HTML은 문서여도 제외하고 알리기만 합니다. 문서이면 `ensure`를 직접 실행하세요.
 - 쓰기 도구나 쓰기 명령 없이 바뀐 작업 폴더 HTML(설치한 훅이 잡지 못하는 도구로 쓴 경우 포함)은 고치지 않고 알리기만 합니다.
 - 스캔 상한(항목 20000개, 깊이 12단계)을 넘는 곳은 알리기만 합니다.
+- Cursor CLI의 `-p`(print) 실행에서는 `beforeSubmitPrompt`·`stop` 훅이 오지 않습니다(Cursor가 인정한 알려진 차이). 그래서 설치는 Cursor에 `sessionStart`(기준 시각)와 `sessionEnd`(끝날 때와 같은 복구)도 겁니다. `sessionEnd`의 결과는 모델이나 사용자에게 전할 길이 없어 `~/.doc-kit/hook.log`에만 남습니다. 대화형에서는 `stop`이 이미 처리했으면 `sessionEnd`는 아무것도 하지 않습니다. 저장 직후(`afterFileEdit`)에 바로 입히지는 않습니다. 같은 턴에 모델이 그 파일을 이어 고치다 실패하는 일을 막기 위해서입니다. 예전에 설치했으면 `install`을 다시 실행하세요(`doctor`가 `없음: sessionStart, sessionEnd`로 알립니다).
+- Cursor CLI는 `~/.cursor/rules`를 따로 읽지 않고 작업 폴더에서 위로 올라가며 `.cursor/rules`를 찾습니다. 그래서 작업 폴더가 홈 밖(`/tmp`, 외장 디스크 등)이면 전역 지침이 빠집니다. 스킬(`~/.agents/skills`)과 훅은 그대로 돕니다.
+- Cursor CLI는 승인 목록 밖의 셸 명령을 거절하므로 모델이 `build`·`check`를 실행하지 못할 수 있습니다. 이때 모델이 HTML 파일을 직접 쓰면 `sessionEnd` 훅이 키트를 넣습니다. 모델이 파일을 쓰지 않고 되묻거나(사용자 환경의 다른 스킬, 예: 설계부터 묻는 스킬) 대화창에 HTML을 출력하면 훅도 고칠 파일이 없어 키트가 들어가지 않습니다.
 
 ## 개발
 

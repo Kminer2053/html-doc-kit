@@ -663,6 +663,43 @@ fs.writeFileSync(cu, plain('', `<h1>${WORD}</h1>`));
 hook('cursor', 'post', {conversation_id: 'cu', workspace_roots: [proj], file_path: cu});
 const cs2 = hook('cursor', 'stop', {conversation_id: 'cu', workspace_roots: [proj]});
 ok('훅: Cursor', run('check', cu).status === 0 && !cs2.stdout.includes('followup'), cs2.stdout);
+// Cursor CLI의 -p 실행: beforeSubmitPrompt·stop 없이 sessionStart → afterFileEdit → sessionEnd만 온다
+{
+  const pid = {conversation_id: 'cp', session_id: 'cp', workspace_roots: [proj]};
+  const ss = hook('cursor', 'start', pid);
+  const cp = path.join(proj, 'cp.html');
+  fs.writeFileSync(cp, plain('', `<h1>${WORD}</h1>`));
+  hook('cursor', 'post', {...pid, hook_event_name: 'afterFileEdit', file_path: cp, edits: []});
+  ok('Cursor print: 저장 직후에는 입히지 않음(같은 턴의 이어 고치기를 망치지 않음)', run('check', cp).status !== 0);
+  const se = hook('cursor', 'end', {...pid, hook_event_name: 'sessionEnd', reason: 'completed'});
+  ok('Cursor print: sessionEnd에서 입힘, 출력은 {}', run('check', cp).status === 0 && se.stdout === '{}' && ss.stdout === '{}' && se.status === 0, se.stdout + se.stderr);
+  const cpAfter = fs.readFileSync(cp);
+  hook('cursor', 'end', pid);
+  ok('Cursor print: 두 번째 sessionEnd는 아무것도 바꾸지 않음', fs.readFileSync(cp).equals(cpAfter));
+  // 대화형(IDE): stop이 이미 처리한 뒤의 sessionEnd는 아무것도 하지 않는다
+  const iid = {conversation_id: 'ci', session_id: 'ci', workspace_roots: [proj]};
+  hook('cursor', 'start', iid);
+  hook('cursor', 'prompt', iid);
+  const ci = path.join(proj, 'ci.html');
+  fs.writeFileSync(ci, plain('', `<h1>${WORD}</h1>`));
+  hook('cursor', 'post', {...iid, file_path: ci});
+  hook('cursor', 'stop', iid);
+  const ciDone = fs.readFileSync(ci);
+  const late = path.join(proj, 'late.html');
+  fs.writeFileSync(late, plain('', '<h1>사용자가 턴 뒤에 저장</h1>'));
+  hook('cursor', 'end', iid);
+  ok('Cursor IDE: stop 뒤 sessionEnd는 건드리지 않음', run('check', ci).status === 0 && fs.readFileSync(ci).equals(ciDone) && run('check', late).status !== 0);
+  // 기록이 없는 세션의 sessionEnd는 작업 폴더를 훑지 않는다
+  hook('cursor', 'end', {session_id: 'none', workspace_roots: [proj]});
+  ok('Cursor: 기록 없는 sessionEnd는 아무것도 하지 않음', run('check', late).status !== 0);
+  // 대화형에서 prompt가 먼저 와 있으면 sessionStart가 기준 시각을 덮지 않는다
+  const sd = path.join(home, '.doc-kit', 'state');
+  const snap = () => fs.readdirSync(sd).sort().map((x) => fs.readFileSync(path.join(sd, x), 'utf-8')).join('\n');
+  const before = snap();
+  hook('cursor', 'start', iid);
+  ok('Cursor: 기록이 있으면 sessionStart는 상태를 바꾸지 않음', snap() === before);
+  fs.rmSync(late);
+}
 const bad = hook('claude', 'stop', {session_id: 'x', cwd: '/nonexistent/dir'});
 ok('훅: 이상한 입력에도 작업을 막지 않음', bad.status === 0);
 
@@ -704,7 +741,14 @@ ok('설치', run('install', '--home', ih).status === 0);
 run('install', '--home', ih);
 const cl = JSON.parse(fs.readFileSync(path.join(ih, '.claude/settings.json'), 'utf-8'));
 ok('설치: 기존 설정 보존, 두 번 설치해도 중복 없음', cl.theme === 'dark' && cl.hooks.Stop.length === 2 && JSON.stringify(cl.hooks.Stop).includes('mine') && cl.hooks.UserPromptSubmit.length === 1);
-ok('설치: 스킬·지침 세 곳', ['.claude/skills/html-doc-kit/SKILL.md', '.agents/skills/html-doc-kit/SKILL.md', '.cursor/rules/html-doc-kit.mdc', '.codex/AGENTS.md'].every((x) => fs.existsSync(path.join(ih, x))) && fs.readFileSync(path.join(ih, '.claude/CLAUDE.md'), 'utf-8').includes('# 내 지침'));
+{
+  const ch = JSON.parse(fs.readFileSync(path.join(ih, '.cursor/hooks.json'), 'utf-8')).hooks;
+  const cmdOf = (e) => (ch[e] || []).map((x) => x.command).join(' ');
+  ok('설치: Cursor 세션 시작·끝 훅(print 모드 대비), 기존 stop 보존, 중복 없음', /hook cursor start$/.test(cmdOf('sessionStart')) && /hook cursor end$/.test(cmdOf('sessionEnd')) && ch.sessionEnd.length === 1 && ch.sessionStart.length === 1 && cmdOf('stop').includes('mine') && ch.stop.length === 2, JSON.stringify(ch));
+  const rule = fs.readFileSync(path.join(ih, '.cursor/rules/html-doc-kit.mdc'), 'utf-8');
+  ok('설치: Cursor 지침에 대화창 출력 금지·셸 거절 시 파일로 쓰기', rule.includes('대화창에 출력하지 말고') && rule.includes('셸 명령이 거절돼'), rule);
+}
+ok('설치: 스킬·지침 세 곳',['.claude/skills/html-doc-kit/SKILL.md', '.agents/skills/html-doc-kit/SKILL.md', '.cursor/rules/html-doc-kit.mdc', '.codex/AGENTS.md'].every((x) => fs.existsSync(path.join(ih, x))) && fs.readFileSync(path.join(ih, '.claude/CLAUDE.md'), 'utf-8').includes('# 내 지침'));
 // 13: Codex 미승인은 문제다. 세 훅이 모두 승인돼야 통과한다
 {
   const d0 = run('doctor', '--home', ih);
@@ -725,8 +769,22 @@ ok('설치: 스킬·지침 세 곳', ['.claude/skills/html-doc-kit/SKILL.md', '.
   const d3 = run('doctor', '--home', ih);
   ok('13 doctor: 훅 하나가 빠지면 문제', d3.status === 1 && d3.stdout.includes('없음: PostToolUse'), d3.stdout);
   fs.writeFileSync(h, saved);
+  // 예전 설치(세션 훅 없음)는 doctor가 문제로 알린다
+  const chf = path.join(ih, '.cursor/hooks.json');
+  const csaved = fs.readFileSync(chf);
+  const old = JSON.parse(csaved);
+  delete old.hooks.sessionStart;
+  delete old.hooks.sessionEnd;
+  fs.writeFileSync(chf, JSON.stringify(old));
+  const d4 = run('doctor', '--home', ih);
+  ok('doctor: Cursor 세션 훅이 없으면 문제', d4.status === 1 && d4.stdout.includes('없음: sessionStart, sessionEnd'), d4.stdout);
+  fs.writeFileSync(chf, csaved);
 }
 run('uninstall', '--home', ih);
+{
+  const ch = JSON.parse(fs.readFileSync(path.join(ih, '.cursor/hooks.json'), 'utf-8')).hooks;
+  ok('제거: Cursor 세션 훅도 빼고 사용자 stop은 남김', !ch.sessionStart && !ch.sessionEnd && JSON.stringify(ch.stop) === JSON.stringify([{command: 'mine'}]), JSON.stringify(ch));
+}
 const cl2 = JSON.parse(fs.readFileSync(path.join(ih, '.claude/settings.json'), 'utf-8'));
 ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2.hooks) === JSON.stringify(keep.hooks) && fs.readFileSync(path.join(ih, '.claude/CLAUDE.md'), 'utf-8').trim() === '# 내 지침' && !fs.existsSync(path.join(ih, '.claude/skills/html-doc-kit')));
 
