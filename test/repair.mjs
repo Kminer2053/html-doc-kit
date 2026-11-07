@@ -668,6 +668,7 @@ ok('28 훅: build 입력 HTML은 2MB 파일로 바뀌지 않음', inbBefore.equa
 hook('claude', 'prompt', sid);
 const euch = path.join(proj, 'euc_hook.html');
 fs.writeFileSync(euch, Buffer.concat([ASCII('<!doctype html><html><head><meta charset="euc-kr"><title>t</title></head><body><h1>'), HAN, ASCII('</h1></body></html>')]));
+hook('claude', 'post', {...sid, tool_name: 'Bash', tool_input: {command: 'python3 conv.py'}});
 hook('claude', 'stop', sid);
 ok('38 훅: EUC-KR도 한글을 지켜 입힘', fs.readFileSync(euch).includes(Buffer.from('한글')) && run('check', euch).status === 0);
 
@@ -813,11 +814,152 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     ok('P4 확인 필요 알림은 한 번만', !o2.includes('late.html'), o2);
     const c = session();
     c.prompt();
-    c.bash('ls');
+    c.bash('python3 gen.py');
     pause(2000);
     const done = c.put('late.html');
     c.stop();
     ok('P4 중단되지 않은 턴이면 마지막 도구 사용 뒤 파일도 고침', hasKit(done));
+  }
+
+  // A8: 쓰기 도구도 쓰기 명령도 없는 턴(ls만)은 작업 폴더를 훑어 고치지 않고 확인 필요로만 알린다. 미처리 구간도 같다
+  {
+    const s = session();
+    const mine = s.put('mine.html');
+    const old = new Date(Date.now() - 86400000);
+    fs.utimesSync(mine, old, old);
+    s.prompt();
+    s.bash('ls -la && git status');
+    fs.appendFileSync(mine, '<p>사용자 추가</p>');
+    const text = fs.readFileSync(mine, 'utf-8');
+    const out = s.stop();
+    ok('A8 읽기 명령만 있는 턴에 사용자가 저장한 기존 HTML은 고치지 않음', fs.readFileSync(mine, 'utf-8') === text && !hasKit(mine), out);
+    ok('A8 쓰기 없는 턴에 바뀐 HTML은 확인 필요로 알림', out.includes(`확인 필요: ${mine}`) && out.includes('쓰기 도구나 쓰기 명령이 없었는데'), out);
+    s.prompt();
+    const saved = s.put('gap_saved.html');
+    s.bash('ls');
+    s.prompt();
+    const o2 = s.stop();
+    ok('A8 쓰기 없는 미처리 구간도 훑어 고치지 않음', !hasKit(saved) && o2.includes(`확인 필요: ${saved}`), o2);
+    s.prompt();
+    const viaRedir = s.put('redir.html');
+    s.bash('echo done > log.txt');
+    const o3 = s.stop();
+    ok('A8 리디렉션으로 쓴 턴은 쓰기가 있는 턴이라 작업 폴더를 훑어 고침', hasKit(viaRedir), o3);
+  }
+
+  // A1: -o/--output은 출력 옵션으로 알려진 프로그램과 스크립트에서만 쓰기 대상이다. ls -o, grep -o는 보지 않는다
+  {
+    const s = session();
+    const away = path.join(root, `a1away${n}`);
+    fs.mkdirSync(away, {recursive: true});
+    const q = (p) => `"${p}"`;
+    const mk = (name) => {
+      const f = path.join(away, name);
+      fs.writeFileSync(f, plain('', `<h1>${WORD}</h1>`));
+      return f;
+    };
+    s.prompt();
+    const lsF = mk('ls.html');
+    const grepF = mk('grep.html');
+    s.bash(`ls -o ${q(lsF)} && grep -o 제목 ${q(grepF)}`);
+    const nodeF = mk('node.html');
+    const pyF = mk('py.html');
+    const curlF = mk('curl.html');
+    s.bash(`node gen.mjs -o ${q(nodeF)} && python3 make.py --output=${q(pyF)} && curl -s -o ${q(curlF)} https://example.invalid/x`);
+    const odd = mk('odd.html');
+    s.bash(`mytool -o ${q(odd)}`);
+    const out = s.stop();
+    ok('A1 ls -o, grep -o 뒤의 파일은 쓰기 대상으로 보지 않음', !hasKit(lsF) && !hasKit(grepF) && !out.includes('ls.html') && !out.includes('grep.html'), out);
+    ok('A1 node·python 스크립트와 curl의 -o/--output은 고침', hasKit(nodeF) && hasKit(pyF) && hasKit(curlF), out);
+    ok('A1 출력 옵션인지 모르는 프로그램의 -o는 고치지 않고 확인 필요로 알림', !hasKit(odd) && out.includes(`확인 필요: ${odd}`), out);
+  }
+
+  // G1·G3·G7: 읽기 전용 프로그램이라도 출력 옵션(tree -o, git diff --output)과 find -exec 안의 명령은 쓰기 대상이다
+  {
+    const s = session();
+    const away = path.join(root, `g137away${n}`);
+    fs.mkdirSync(away, {recursive: true});
+    const mk = (name) => {
+      const f = path.join(away, name);
+      fs.writeFileSync(f, plain('', `<h1>${WORD}</h1>`));
+      return f;
+    };
+    s.prompt();
+    const treeF = mk('tree.html');
+    const findF = mk('find.html');
+    const gitF = mk('git.html');
+    s.bash(`tree -H . -o "${treeF}"`);
+    s.bash(`find . -name a.md -exec pandoc {} -o "${findF}" \\;`);
+    s.bash(`git diff --output="${gitF}"`);
+    const out = s.stop();
+    ok('G1 tree -o로 쓴 파일은 고침', hasKit(treeF), out);
+    ok('G3 find -exec 안의 pandoc -o로 쓴 파일은 고침', hasKit(findF), out);
+    ok('G7 git diff --output으로 쓴 파일은 고침', hasKit(gitF), out);
+  }
+
+  // A2: cp·mv·rsync 대상 폴더는 훑지 않는다. 원본 이름(글롭은 펼침, -r 폴더는 안의 HTML)을 대상에 붙인 경로만 고친다
+  {
+    const s = session();
+    const src = path.join(root, `a2src${n}`);
+    const dest = path.join(root, `a2dest${n}`);
+    fs.mkdirSync(path.join(src, 'sub', 'deep'), {recursive: true});
+    fs.mkdirSync(dest, {recursive: true});
+    const body = plain('', `<h1>${WORD}</h1>`);
+    for (const r of ['one.html', 'g1.html', 'g2.html', 'sub/s.html', 'sub/deep/d.html']) fs.writeFileSync(path.join(src, r), body);
+    const q = (p) => `"${p}"`;
+    s.prompt();
+    const user = path.join(dest, 'user.html');
+    fs.writeFileSync(user, body);
+    const userText = fs.readFileSync(user, 'utf-8');
+    fs.copyFileSync(path.join(src, 'one.html'), path.join(dest, 'one.html'));
+    s.bash(`cp ${q(path.join(src, 'one.html'))} ${q(dest)}/`);
+    for (const g of ['g1.html', 'g2.html']) fs.copyFileSync(path.join(src, g), path.join(dest, g));
+    s.bash(`cd ${q(src)} && cp *.html ${q(dest)}/`);
+    fs.cpSync(path.join(src, 'sub'), path.join(dest, 'sub'), {recursive: true});
+    s.bash(`cp -r ${q(path.join(src, 'sub'))} ${q(dest)}`);
+    const mvSrc = path.join(src, 'mvdir');
+    fs.mkdirSync(mvSrc);
+    fs.writeFileSync(path.join(mvSrc, 'm.html'), body);
+    fs.renameSync(mvSrc, path.join(dest, 'mvdir'));
+    s.bash(`mv ${q(mvSrc)} ${q(dest)}/`);
+    const out = s.stop();
+    ok('A2 대상 폴더의 사용자 파일은 고치지 않음', fs.readFileSync(user, 'utf-8') === userText && !out.includes('user.html'), out);
+    ok('A2 원본 파일·글롭 이름을 대상 폴더에 붙여 고침', ['one.html', 'g1.html', 'g2.html'].every((x) => hasKit(path.join(dest, x))), out);
+    ok('A2 cp -r 폴더 안의 HTML을 대상에 붙여 고침', hasKit(path.join(dest, 'sub', 's.html')) && hasKit(path.join(dest, 'sub', 'deep', 'd.html')), out);
+    ok('A2 mv로 옮긴 폴더 안의 HTML을 고침', hasKit(path.join(dest, 'mvdir', 'm.html')), out);
+    ok('A2 원본 폴더는 건드리지 않음', !hasKit(path.join(src, 'one.html')) && !hasKit(path.join(src, 'sub', 's.html')), out);
+  }
+
+  // A4: 스캔 상한에 걸리면 말없이 멈추지 않고 알린다. 깊이 상한도 알린다
+  {
+    const s = session();
+    for (let i = 0; i < 60; i++) fs.writeFileSync(path.join(s.dir, `f${i}.txt`), 'x');
+    let deep = s.dir;
+    for (let i = 0; i < 14; i++) deep = path.join(deep, `d${i}`);
+    fs.mkdirSync(deep, {recursive: true});
+    s.prompt();
+    const deepFile = path.join(deep, 'deep.html');
+    fs.writeFileSync(deepFile, plain('', `<h1>${WORD}</h1>`));
+    s.bash('python3 gen.py');
+    const out = hk('claude', 'stop', {session_id: `s${n}`, cwd: s.dir}, {...fast, DOC_KIT_SCAN_ENTRIES_MAX: '50'}).stdout;
+    ok('A4 스캔 상한에 걸리면 알림', out.includes('스캔을 50개에서 멈췄습니다') && out.includes('ensure를 실행하세요'), out);
+    s.prompt();
+    fs.writeFileSync(deepFile, plain('', `<h1>${WORD} 2</h1>`));
+    s.bash('python3 gen.py');
+    const o2 = s.stop();
+    ok('A4 깊이 상한(12단계)에 걸리면 알리고 그 아래는 고치지 않음', !hasKit(deepFile) && o2.includes('12단계보다 깊은 폴더는 훑지 않았습니다'), o2);
+  }
+
+  // A9: pre·code·textarea 안의 템플릿 문법 예시는 템플릿 판정에 넣지 않는다
+  {
+    const s = session();
+    s.prompt();
+    const pre = s.write('guide.html', plain('', '<h1>Jinja 사용법</h1><pre><code>{% for x in xs %}{{ x }}{% endfor %}</code></pre><p>예시입니다</p>'));
+    const ta = s.write('ta.html', plain('', '<h1>양식</h1><textarea>{% if a %}글{% endif %}</textarea><p><code>&lt;% end %&gt;</code> <code><% x %></code></p>'));
+    const real = s.write('real_tmpl.html', plain('', '<pre>{% raw %}</pre><p>{% if a %}글{% endif %}</p>'));
+    const out = s.stop();
+    ok('A9 pre/code·textarea 안의 {% %} 예시가 있는 보고서는 입힘', hasKit(pre) && hasKit(ta), out);
+    ok('A9 본문의 지시문은 여전히 템플릿으로 건너뜀', !hasKit(real) && out.includes('템플릿으로 보여'), out);
   }
 
   // 4·26: 템플릿 판정을 좁히고, 그래도 건너뛰면 알린다
@@ -852,6 +994,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     hk('claude', 'prompt', uid);
     const upf = path.join(up, 'a', 'b', 'up.html');
     fs.writeFileSync(upf, plain('', `<h1>${WORD}</h1>`));
+    hk('claude', 'post', {...uid, tool_name: 'Bash', tool_input: {command: 'python3 gen.py'}});
     hk('claude', 'stop', uid);
     ok('10 .git이 없으면 작업 폴더 위의 package.json은 보지 않음', hasKit(upf));
     const s2 = session();
@@ -1032,6 +1175,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     fs.writeFileSync(dash, plain('', '<h1>차트</h1><canvas></canvas><script>draw()</script>'));
     const offf = path.join(cur, 'off.html');
     fs.writeFileSync(offf, plain('<meta name="doc-kit" content="off">', '<p>끔</p>'));
+    hk('cursor', 'post', {...cid, command: 'python3 gen.py'});
     const c = hk('cursor', 'stop', cid).stdout;
     ok('7 사본 규칙은 그대로', !hasKit(dash) && hasKit(path.join(cur, 'dash_편집용.html')));
     ok('7·20 Cursor도 사본·제외·미실행·경고를 알림', c.includes('followup_message') && c.includes('dash_편집용.html') && c.includes('off.html') && c.includes('미실행') && c.includes('경고'), c);
@@ -1076,6 +1220,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const app = s.put('AppData/Local/a.html');
     const nm = s.put('node_modules/pkg/readme.html');
     const real = s.put('note.html');
+    s.bash('python3 gen.py');
     s.stop();
     ok('27·41 점 폴더, Library, AppData, node_modules는 스캔하지 않음', [lib, dot, vsc, app, nm].every((f) => !hasKit(f)) && hasKit(real));
 
@@ -1112,6 +1257,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     git('checkout', '-q', 'f');
     const fresh = g.put('new.html');
     const ign = g.put('ignored/i.html');
+    g.bash('python3 gen.py');
     const gout = g.stop();
     ok('40 git checkout으로 바뀐 파일은 입히지 않음', !hasKit(d1) && git('status', '--porcelain', '--', 'docs').stdout === '', gout);
     ok('R1 checkout으로 건너뛴 파일도 알림', gout.includes('d1.html') && gout.includes('checkout·pull·rebase 등으로'), gout);
@@ -1194,6 +1340,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const five = session();
     five.prompt();
     const fv = Array.from({length: 5}, (_, i) => five.put(`r${i}.html`));
+    five.bash('python3 gen.py');
     five.stop();
     ok('40 5개까지는 입힘', fv.every(hasKit));
   }
@@ -1213,6 +1360,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       s.put(conf, '');
       s.prompt();
       const f = s.put('index.html');
+      s.bash('python3 gen.py');
       s.stop();
       ok(`39 설정 ${conf}`, !hasKit(f));
     }
@@ -1223,6 +1371,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       const s = session();
       s.prompt();
       const fs5 = part.map((r) => s.put(r));
+      s.bash('python3 gen.py');
       const out = s.stop();
       ok(`R4 앱 신호가 없으면 ${part.map((r) => r.split('/')[0]).join(', ')}도 입힘`, fs5.every(hasKit), fs5.filter((f) => !hasKit(f)).join() + out);
     }
@@ -1232,6 +1381,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       s.put(sig, text);
       s.prompt();
       const fs5 = appDirs.map((r) => s.put(r));
+      s.bash('python3 gen.py');
       const out = s.stop();
       ok(`R4 앱 신호(${sig})가 있으면 앱 폴더를 빼고 알림`, fs5.every((f) => !hasKit(f)) && out.includes('제외:') && out.includes('emails') && out.includes(sig === 'package.json' ? 'express' : '앱 폴더'), out);
     }
@@ -1307,6 +1457,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       a.prompt();
       const tpl = a.put('templates/page.html');
       const rep = a.put('reports/r.html');
+      a.bash('python3 gen.py');
       const out = a.stop();
       ok('N1 flask 프로젝트의 templates/는 빼고 알림, 그 밖은 사본', !hasKit(tpl) && out.includes('templates/') && out.includes('flask') && !hasKit(rep) && hasKit(path.join(a.dir, 'reports', 'r_편집용.html')), out);
     }
@@ -1373,6 +1524,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     s.prompt();
     fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각 고침</p></section>');
     fs.utimesSync(inb, new Date(Date.now() + 2000), new Date(Date.now() + 2000));
+    s.bash('python3 gen.py');
     const o2 = s.stop();
     ok('28 입력만 고치고 다시 만들지 않으면 알림', o2.includes('반영하지 않았습니다'), o2);
   }

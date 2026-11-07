@@ -12587,7 +12587,7 @@ var LANG_FILES = [
 ];
 var OUTSIDE_DIRS = ["Desktop", "Downloads", "Documents"];
 var SCAN_FILES_MAX = 5;
-var SCAN_ENTRIES_MAX = 2e4;
+var scanEntriesMax = () => Number(process.env.DOC_KIT_SCAN_ENTRIES_MAX) || 2e4;
 var SKIP_NOTES_MAX = 8;
 var WARNINGS_PER_FILE = 5;
 var STALE_MS = 12 * 3600 * 1e3;
@@ -12718,9 +12718,47 @@ var READ_ONLY = /* @__PURE__ */ new Set(["ls", "cat", "head", "tail", "less", "m
 var READ_ONLY_GIT = /* @__PURE__ */ new Set(["status", "log", "diff", "show", "branch", "remote", "rev-parse", "ls-files", "blame", "describe"]);
 var SHELL_WORDS = /* @__PURE__ */ new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "}", "sudo", "command", "nohup", "time", "env", "exec", "export"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
+var OUTPUT_PROGS = /* @__PURE__ */ new Set(["curl", "pandoc", "gcc", "g++", "cc", "c++", "clang", "clang++", "rustc", "go", "sort", "quarto", "asciidoctor", "asciidoc", "marp", "mmdc", "jupyter", "sass", "esbuild", "typst", "markdown-it", "marked", "showdown", "md2html", "pdf2htmlEX", "wkhtmltopdf", "weasyprint", "xsltproc", "protoc"]);
+var RUNNERS = /* @__PURE__ */ new Set(["node", "deno", "bun", "bunx", "tsx", "ts-node", "npx", "pnpm", "yarn", "npm", "ruby", "perl", "php", "Rscript", "sh", "bash", "zsh", "uv", "uvx", "poetry", "pipx", "pipenv", "conda"]);
+var isRunner = (prog, arg0) => RUNNERS.has(prog) || /^python[\d.]*$|^py$/.test(prog) || /\.(?:py|[cm]?js|ts|sh|rb|pl|php|R)$/.test(prog) || /^\.\.?\//.test(arg0);
+var TREE_MAX = 500;
+var SCAN_DEPTH_MAX = 12;
+var hasGlob = (s) => /[*?[]/.test(s);
+function expandGlob(absPattern) {
+  const dir = path5.dirname(absPattern);
+  const base = path5.basename(absPattern);
+  if (hasGlob(dir)) return null;
+  const re2 = new RegExp(`^${base.replace(/[.+^${}()|\\]/g, "\\$&").replace(/\*/g, "[^/]*").replace(/\?/g, "[^/]")}$`);
+  try {
+    return fs6.readdirSync(dir).filter((n) => re2.test(n) && (base.startsWith(".") || !n.startsWith("."))).map((n) => path5.join(dir, n));
+  } catch {
+    return [];
+  }
+}
+function htmlTree(root) {
+  const out = [];
+  let cut = false;
+  const walkDir = (d, rel, depth) => {
+    if (depth > SCAN_DEPTH_MAX) return void (cut = true);
+    let list;
+    try {
+      list = fs6.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of list) {
+      if (out.length >= TREE_MAX) return void (cut = true);
+      if (e.isDirectory()) {
+        if (!e.name.startsWith(".") && !SCAN_SKIP.has(e.name)) walkDir(path5.join(d, e.name), path5.join(rel, e.name), depth + 1);
+      } else if (e.isFile() && isHtml(e.name)) out.push(path5.join(rel, e.name));
+    }
+  };
+  walkDir(root, "", 0);
+  return { rels: out, cut };
+}
 function readShell(cmd2, cwd) {
   const home = HOME();
-  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), ran: false };
+  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), maybe: /* @__PURE__ */ new Set(), notes: /* @__PURE__ */ new Set(), ran: false, wrote: false };
   const vars = { HOME: home };
   let dir = cwd;
   const expand = (w2) => {
@@ -12742,7 +12780,10 @@ function readShell(cmd2, cwd) {
     const args = [];
     for (let i = 0; i < words.length; i++) {
       if (words[i] === REDIR) {
-        if (typeof words[i + 1] === "string") addFile(words[++i]);
+        if (typeof words[i + 1] === "string") {
+          if (words[i + 1] !== "/dev/null") out.wrote = true;
+          addFile(words[++i]);
+        }
       } else if (words[i] === STDIN) i++;
       else args.push(words[i]);
     }
@@ -12759,6 +12800,24 @@ function readShell(cmd2, cwd) {
     const a3 = args.slice(k);
     if (!a3.length) continue;
     const prog = path5.basename(a3[0]);
+    if (prog === "find") {
+      for (let i = 1; i < a3.length; i++) {
+        if (!["-exec", "-execdir", "-ok", "-okdir"].includes(a3[i])) continue;
+        const sub = [];
+        for (i++; i < a3.length && a3[i] !== ";" && a3[i] !== "+"; i++) sub.push(a3[i]);
+        if (!sub.length) continue;
+        const r = readShell(sub.map((w2) => `"${w2.replace(/["\\`]/g, "\\$&")}"`).join(" "), dir);
+        for (const key of ["written", "removed", "unknown", "maybe", "notes"]) r[key].forEach((v) => out[key].add(v));
+        out.ran ||= r.ran;
+        out.wrote ||= r.wrote;
+      }
+    }
+    for (let i = 1; i < a3.length; i++) {
+      const gitOut = prog === "git" && READ_ONLY_GIT.has(a3[1]);
+      if (prog === "tree" && a3[i] === "-o" && a3[i + 1]) out.ran = true, addFile(a3[i + 1]);
+      else if (gitOut && a3[i] === "--output" && a3[i + 1]) out.ran = true, addFile(a3[i + 1]);
+      else if (gitOut && a3[i].startsWith("--output=")) out.ran = true, addFile(a3[i].slice(9));
+    }
     if (!["cd", "pushd", "popd"].includes(prog) && !READ_ONLY.has(prog) && !(prog === "git" && READ_ONLY_GIT.has(a3[1]))) out.ran = true;
     if (prog === "cd" || prog === "pushd") {
       const { s, unresolved } = expand(a3[1] ?? "~");
@@ -12769,7 +12828,11 @@ function readShell(cmd2, cwd) {
       dir = null;
       continue;
     }
-    if (prog === "tee") a3.slice(1).filter((w2) => !w2.startsWith("-")).forEach(addFile);
+    if (prog === "tee") {
+      const files = a3.slice(1).filter((w2) => !w2.startsWith("-"));
+      if (files.length) out.wrote = true;
+      files.forEach(addFile);
+    }
     if (prog === "rm" || prog === "unlink") {
       for (const w2 of a3.slice(1)) {
         const { s, unresolved } = expand(w2);
@@ -12780,9 +12843,11 @@ function readShell(cmd2, cwd) {
     if (["mv", "cp", "rsync", "install", "ditto"].includes(prog)) {
       const pos2 = [];
       let target = null;
+      let recursive = prog === "mv" || prog === "ditto";
       for (let i = 1; i < a3.length; i++) {
         if (a3[i] === "-t" || a3[i] === "--target-directory") target = a3[++i];
         else if (a3[i].startsWith("--target-directory=")) target = a3[i].slice(19);
+        else if (a3[i] === "--recursive" || a3[i] === "--archive" || /^-[A-Za-z]+$/.test(a3[i]) && /[rRa]/.test(a3[i]) && prog !== "install") recursive = true;
         else if (!a3[i].startsWith("-")) pos2.push(a3[i]);
       }
       const dest = target ?? pos2.pop();
@@ -12791,62 +12856,121 @@ function readShell(cmd2, cwd) {
         const to = d.unresolved ? null : abs(d.s);
         const toDir = to && (d.s.endsWith("/") || target !== null || statOf(to)?.isDirectory());
         if (!toDir) addFile(dest);
+        const putTree = (srcDir, s) => {
+          const into = path5.join(to, path5.basename(srcDir));
+          if (prog === "mv") {
+            const moved = statOf(into)?.isDirectory() ? into : to;
+            const t2 = htmlTree(moved);
+            t2.rels.forEach((r) => out.written.add(path5.join(moved, r)));
+            if (t2.cut) out.notes.add(`${moved} \uC548\uC758 HTML\uC740 ${TREE_MAX}\uAC1C\uAE4C\uC9C0\uB9CC \uAE30\uB85D\uD588\uC2B5\uB2C8\uB2E4. \uC62E\uAE34 HTML\uC774 \uB354 \uC788\uC73C\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
+            return;
+          }
+          const t = htmlTree(srcDir);
+          const bases = prog === "rsync" && s.endsWith("/") ? [to] : [into, to];
+          for (const r of t.rels) out.written.add(path5.join(bases.find((b) => statOf(path5.join(b, r))) ?? bases[0], r));
+          if (t.cut) out.notes.add(`${srcDir} \uC548\uC758 HTML\uC740 ${TREE_MAX}\uAC1C\uAE4C\uC9C0\uB9CC \uAE30\uB85D\uD588\uC2B5\uB2C8\uB2E4. \uBCF5\uC0AC\uD55C HTML\uC774 \uB354 \uC788\uC73C\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
+        };
         for (const w2 of pos2) {
           const { s, unresolved } = expand(w2);
+          if (/^[\w.-]+@?[\w.-]*:/.test(s) && prog === "rsync") continue;
           if (toDir) {
-            if (unresolved || /[*?[]/.test(s) || !path5.extname(s)) out.dirs.add(to);
-            else if (isHtml(s)) out.written.add(path5.join(to, path5.basename(s)));
+            if (unresolved) {
+              if (isHtml(s) || hasGlob(s) || !path5.extname(s)) out.unknown.add(`${prog} ${s} \u2192 ${d.s}`);
+            } else if (hasGlob(s)) {
+              const names = expandGlob(abs(s));
+              if (names === null || !names.length && prog === "mv") out.unknown.add(`${prog} ${s} \u2192 ${d.s}`);
+              for (const n of names || []) {
+                const st2 = statOf(n);
+                if (st2?.isFile() && isHtml(n)) out.written.add(path5.join(to, path5.basename(n)));
+                else if (st2?.isDirectory() && recursive) putTree(n, s);
+              }
+            } else if (isHtml(s)) out.written.add(path5.join(to, path5.basename(s)));
+            else if (recursive) {
+              const into = statOf(path5.join(to, path5.basename(s)));
+              const isDir = prog === "mv" ? !statOf(abs(s)) && (into?.isDirectory() || !into && pos2.length === 1 && !d.s.endsWith("/")) : statOf(abs(s))?.isDirectory();
+              if (isDir) putTree(abs(s), s);
+            }
           } else if (!to && !isHtml(d.s) && isHtml(s)) out.unknown.add(s);
           const from = !unresolved && abs(s);
           if (prog === "mv" && from) out.removed.add(from);
         }
       }
     }
-    for (let i = 1; i < a3.length; i++) {
-      if (a3[i] === "-o" || a3[i] === "--output" || prog === "wget" && (a3[i] === "-O" || a3[i] === "--output-document")) {
-        if (a3[i + 1]) addFile(a3[i + 1]);
-      } else if (a3[i].startsWith("--output=")) addFile(a3[i].slice(9));
+    if (!READ_ONLY.has(prog) && !(prog === "git" && READ_ONLY_GIT.has(a3[1]))) {
+      const known = OUTPUT_PROGS.has(prog) || isRunner(prog, a3[0]);
+      const take = (w2) => {
+        if (known) return addFile(w2);
+        const { s, unresolved } = expand(w2);
+        if (isHtml(s) && !unresolved && abs(s)) out.maybe.add(abs(s));
+      };
+      for (let i = 1; i < a3.length; i++) {
+        if (prog === "wget") {
+          if (a3[i] === "-O" || a3[i] === "--output-document") a3[i + 1] && addFile(a3[i + 1]);
+          else if (a3[i].startsWith("--output-document=")) addFile(a3[i].slice(18));
+        } else if (a3[i] === "-o" || a3[i] === "--output") {
+          if (a3[i + 1]) take(a3[i + 1]);
+        } else if (a3[i].startsWith("--output=")) take(a3[i].slice(9));
+      }
     }
   }
   return out;
 }
+var READ_TOOLS = /^(?:Read|Glob|Grep|LS|NotebookRead|WebFetch|WebSearch|TodoWrite|TodoRead|Task|view|read_file|list_files|search)$/;
 function effectsOf(i) {
   const cwd = cwdOf(i);
-  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), ran: false };
+  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), maybe: /* @__PURE__ */ new Set(), notes: /* @__PURE__ */ new Set(), ran: false, active: false };
   const add = (p) => {
     if (typeof p === "string" && isHtml(p)) out.written.add(path5.resolve(cwd, p.replace(/^~(?=\/)/, HOME())));
   };
   const t = i.tool_input || i.input || {};
-  [i.file_path, t.file_path, t.path, t.notebook_path].forEach(add);
-  for (const text of [t.command, t.patch, t.input, i.command]) {
+  const readTool = READ_TOOLS.test(i.tool_name || "");
+  const paths2 = [i.file_path, t.file_path, t.path, t.notebook_path].filter((p) => typeof p === "string" && p);
+  if (!readTool) {
+    paths2.forEach(add);
+    if (paths2.length) out.active = true;
+  }
+  for (const text of readTool ? [] : [t.command, t.patch, t.input, i.command]) {
     if (typeof text !== "string") continue;
     if (text.includes("*** Begin Patch") || text.includes("*** Add File:") || text.includes("*** Update File:")) {
+      out.active = true;
       for (const m of text.matchAll(/\*\*\* (?:Add File|Update File|Move to): (.+)/g)) add(m[1].trim());
       continue;
     }
     const r = readShell(text, cwd);
-    for (const k of ["written", "removed", "dirs", "unknown"]) r[k].forEach((v) => out[k].add(v));
+    for (const k of ["written", "removed", "unknown", "maybe", "notes"]) r[k].forEach((v) => out[k].add(v));
     out.ran ||= r.ran;
+    out.active ||= r.ran || r.wrote || r.written.size > 0;
   }
   return out;
 }
-function scan(dir, fresh, found = [], depth = 0, budget = { left: SCAN_ENTRIES_MAX }) {
-  if (depth > 6 || found.length > 500 || budget.left <= 0) return found;
-  let list;
-  try {
-    list = fs6.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return found;
-  }
-  budget.left -= list.length;
-  for (const e of list) {
-    const p = path5.join(dir, e.name);
-    if (e.isDirectory()) {
-      if (!e.name.startsWith(".") && !SCAN_SKIP.has(e.name)) scan(p, fresh, found, depth + 1, budget);
-    } else if (e.isFile() && isHtml(e.name)) {
-      if (fresh(statOf(p)?.mtimeMs ?? 0)) found.push(p);
+function scan(dir, fresh, notes = null) {
+  const max = scanEntriesMax();
+  const budget = { left: max, cut: false, deep: false };
+  const found = [];
+  const walkDir = (d, depth) => {
+    if (found.length > 500 || budget.left <= 0) return void (budget.cut = true);
+    let list;
+    try {
+      list = fs6.readdirSync(d, { withFileTypes: true });
+    } catch {
+      return;
     }
-  }
+    budget.left -= list.length;
+    for (const e of list) {
+      const p = path5.join(d, e.name);
+      if (e.isDirectory()) {
+        if (e.name.startsWith(".") || SCAN_SKIP.has(e.name)) continue;
+        if (depth >= SCAN_DEPTH_MAX) budget.deep = true;
+        else walkDir(p, depth + 1);
+      } else if (e.isFile() && isHtml(e.name)) {
+        if (fresh(statOf(p)?.mtimeMs ?? 0)) found.push(p);
+      }
+    }
+  };
+  walkDir(dir, 0);
+  if (budget.left <= 0 || found.length > 500) budget.cut = true;
+  if (notes && budget.cut) notes.add(`\uC2A4\uCE94\uC744 ${max}\uAC1C\uC5D0\uC11C \uBA48\uCDC4\uC2B5\uB2C8\uB2E4(${dir}). \uC774\uBC88 \uC791\uC5C5\uC5D0\uC11C \uB9CC\uB4E0 HTML\uC774 \uB354 \uC788\uC73C\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
+  if (notes && budget.deep) notes.add(`${dir} \uC544\uB798 ${SCAN_DEPTH_MAX}\uB2E8\uACC4\uBCF4\uB2E4 \uAE4A\uC740 \uD3F4\uB354\uB294 \uD6D1\uC9C0 \uC54A\uC558\uC2B5\uB2C8\uB2E4. \uC774\uBC88 \uC791\uC5C5\uC5D0\uC11C \uB9CC\uB4E0 HTML\uC774 \uB354 \uC788\uC73C\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
   return found;
 }
 function scanShallow(dir, fresh) {
@@ -12976,7 +13100,7 @@ function hasOwnScript(source) {
   return hit;
 }
 function hasTemplateDirective(source) {
-  const s = source.slice(0, 2e5).replace(/<(style|script)\b[\s\S]*?<\/\1>/gi, "");
+  const s = source.slice(0, 2e5).replace(/<(style|script|pre|code|textarea)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "");
   return /\{%[\s\S]{0,500}?%\}|<%[\s\S]{0,2000}?%>|\{\{[#>/^][\s\S]{0,200}?\}\}/.test(s);
 }
 var newerThanFile = (a3, b) => (statOf(a3)?.mtimeMs ?? 0) > (statOf(b)?.mtimeMs ?? Infinity);
@@ -13045,8 +13169,9 @@ function describe(results, state, extra) {
 async function runStop(state, cwd) {
   const began = Date.now();
   const base = state.start ?? began;
-  const ranges = [...(state.gaps || []).map((g) => ({ from: g.from - 1500, to: g.to + 1500, cwd: g.cwd })), { from: base - 1500, to: Infinity, cwd }];
+  const ranges = [...(state.gaps || []).map((g) => ({ from: g.from - 1500, to: g.to + 1500, cwd: g.cwd, active: g.active !== false })), { from: base - 1500, to: Infinity, cwd, active: state.active !== false }];
   const fresh = (ms) => ranges.some((r) => ms >= r.from && ms <= r.to);
+  const freshIn = (rs) => (ms) => rs.some((r) => ms >= r.from && ms <= r.to);
   const inRange = (sec) => ranges.some((r) => sec >= Math.floor((r.from + 1500) / 1e3) && sec * 1e3 <= r.to);
   const committedInTurn = (c2) => c2 !== null && c2.local && inRange(c2.at) && inRange(c2.ct);
   const pathSince = (state.pathsStart ?? base) - 1500;
@@ -13062,7 +13187,10 @@ async function runStop(state, cwd) {
   }
   if (missing.length) extra.push(`\uAE30\uB85D\uB41C \uD30C\uC77C\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4(\uC62E\uACBC\uAC70\uB098 \uC9C0\uC6E0\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4): ${missing.slice(0, SKIP_NOTES_MAX).join(", ")}. \uC62E\uACBC\uB2E4\uBA74 \uC0C8 \uC704\uCE58\uC5D0\uC11C ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
   const scanned = /* @__PURE__ */ new Set();
-  for (const d of new Set(ranges.map((r) => r.cwd).filter(Boolean))) if (!isHomeOrRoot(d)) scan(d, fresh).forEach((p) => scanned.add(p));
+  const scanNotes = /* @__PURE__ */ new Set();
+  const activeRanges = ranges.filter((r) => r.active);
+  for (const d of new Set(activeRanges.map((r) => r.cwd).filter(Boolean))) if (!isHomeOrRoot(d)) scan(d, freshIn(activeRanges), scanNotes).forEach((p) => scanned.add(p));
+  scanNotes.forEach((m) => extra.push(m));
   const isKitFile = (p) => {
     try {
       return fs6.readFileSync(p, "latin1").includes("data-doc-kit=");
@@ -13083,7 +13211,25 @@ async function runStop(state, cwd) {
   const lateList = [...late].filter((p) => !explicit.includes(p));
   lateList.slice(0, SKIP_NOTES_MAX).forEach((p) => extra.push(`\uD655\uC778 \uD544\uC694: ${p} (\uC911\uB2E8\uB41C \uC791\uC5C5\uC758 \uB9C8\uC9C0\uB9C9 \uB3C4\uAD6C \uC0AC\uC6A9 \uB4A4\uC5D0 \uBC14\uB010 HTML\uC774\uB77C \uC0AC\uC6A9\uC790\uAC00 \uC800\uC7A5\uD55C \uD30C\uC77C\uC77C \uC218 \uC788\uC5B4 \uADF8\uB300\uB85C \uB450\uC5C8\uC2B5\uB2C8\uB2E4. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)`));
   if (lateList.length > SKIP_NOTES_MAX) extra.push(`\uD655\uC778 \uD544\uC694: \uC911\uB2E8\uB41C \uC791\uC5C5 \uB4A4\uC5D0 \uBC14\uB010 HTML ${lateList.length - SKIP_NOTES_MAX}\uAC1C \uB354`);
-  for (const d of state.dirs || []) (isHomeOrRoot(d) ? scanShallow(d, fresh) : scan(d, fresh)).forEach((p) => scanned.add(p));
+  const idleRanges = ranges.filter((r) => !r.active);
+  const idle = [];
+  for (const d of new Set(idleRanges.map((r) => r.cwd).filter(Boolean))) {
+    if (isHomeOrRoot(d)) continue;
+    for (const p of scan(d, (ms) => freshIn(idleRanges)(ms) && !freshIn(activeRanges)(ms))) {
+      const st2 = statOf(p);
+      if (scanned.has(p) || late.has(p) || explicit.includes(p) || idle.includes(p) || !st2 || already(p, st2) || isKitFile(p) || excludedByConfig(p) || projectSignals(p, cwd).app) continue;
+      if (["same", "ignored"].includes(gitState(p))) continue;
+      idle.push(p);
+    }
+  }
+  idle.slice(0, SKIP_NOTES_MAX).forEach((p) => extra.push(`\uD655\uC778 \uD544\uC694: ${p} (\uC774\uBC88 \uC791\uC5C5\uC5D0 \uC4F0\uAE30 \uB3C4\uAD6C\uB098 \uC4F0\uAE30 \uBA85\uB839\uC774 \uC5C6\uC5C8\uB294\uB370 \uBC14\uB010 HTML\uC774\uB77C \uC0AC\uC6A9\uC790\uAC00 \uC800\uC7A5\uD55C \uD30C\uC77C\uC77C \uC218 \uC788\uC5B4 \uADF8\uB300\uB85C \uB450\uC5C8\uC2B5\uB2C8\uB2E4. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)`));
+  if (idle.length > SKIP_NOTES_MAX) extra.push(`\uD655\uC778 \uD544\uC694: \uC4F0\uAE30 \uC5C6\uC774 \uBC14\uB010 HTML ${idle.length - SKIP_NOTES_MAX}\uAC1C \uB354`);
+  const maybe = [...new Set(state.maybe || [])].filter((p) => {
+    const st2 = statOf(p);
+    return st2?.isFile() && !explicit.includes(p) && !scanned.has(p) && Math.max(st2.mtimeMs, st2.ctimeMs) >= pathSince && !already(p, st2) && !isKitFile(p);
+  });
+  maybe.slice(0, SKIP_NOTES_MAX).forEach((p) => extra.push(`\uD655\uC778 \uD544\uC694: ${p} (\uBA85\uB839\uC758 -o \uB4A4\uC5D0 \uB098\uC654\uC9C0\uB9CC \uADF8 \uD504\uB85C\uADF8\uB7A8\uC758 \uCD9C\uB825 \uD30C\uC77C\uC778\uC9C0 \uC54C \uC218 \uC5C6\uC5B4 \uADF8\uB300\uB85C \uB450\uC5C8\uC2B5\uB2C8\uB2E4. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)`));
+  (state.notes || []).forEach((m) => extra.push(m));
   if (state.scriptSince) {
     const scriptFresh = (ms) => ms >= state.scriptSince - 1500 && fresh(ms);
     const seen = /* @__PURE__ */ new Set([...scanned, ...explicit, ...late]);
@@ -13164,32 +13310,36 @@ async function hook(agent, event) {
       const s = load(f);
       const now = Date.now();
       const cwd = cwdOf(input);
-      if (!s) store(f, { start: now, turnAt: now, cwd, paths: [], open: true });
+      if (!s) store(f, { start: now, turnAt: now, cwd, paths: [], open: true, active: false });
       else {
         const gaps = (s.gaps || []).filter((g) => g.to >= now - STALE_MS);
         if (s.open && s.start) {
           const to = Math.max(s.lastPost ?? 0, s.turnAt ?? s.start);
-          if (to >= now - STALE_MS) gaps.push({ from: s.start, to, next: now, cwd: s.cwd });
+          if (to >= now - STALE_MS) gaps.push({ from: s.start, to, next: now, cwd: s.cwd, active: s.active !== false });
         }
         const keep = gaps.length > 0;
         const paths2 = s.paths || [];
-        store(f, { ...s, start: now, turnAt: now, cwd, open: true, lastPost: null, gaps: gaps.slice(-5), paths: paths2, pathsStart: paths2.length ? s.pathsStart ?? s.start : null, dirs: keep ? s.dirs : [], scriptSince: keep ? s.scriptSince : null });
+        const { dirs, ...rest2 } = s;
+        void dirs;
+        store(f, { ...rest2, start: now, turnAt: now, cwd, open: true, active: false, lastPost: null, gaps: gaps.slice(-5), paths: paths2, pathsStart: paths2.length ? s.pathsStart ?? s.start : null, scriptSince: keep ? s.scriptSince : null, maybe: keep ? s.maybe : [], notes: keep ? s.notes : [] });
       }
     } else if (event === "post") {
       const s = load(f) || { start: Date.now(), cwd: cwdOf(input), paths: [] };
       const e = effectsOf(input);
       const merge = (old, add) => [.../* @__PURE__ */ new Set([...old || [], ...add])];
       s.paths = merge(s.paths, e.written).filter((p) => !e.removed.has(p) || e.written.has(p));
-      if (e.dirs.size) s.dirs = merge(s.dirs, e.dirs);
       if (e.unknown.size) s.unknown = merge(s.unknown, e.unknown).slice(0, 10);
+      if (e.maybe.size) s.maybe = merge(s.maybe, e.maybe).slice(0, 20);
+      if (e.notes.size) s.notes = merge(s.notes, e.notes).slice(0, 10);
       if (e.ran) s.scriptSince ||= s.turnAt ?? s.start;
+      if (e.active) s.active = true;
       s.lastPost = Date.now();
       store(f, s);
     } else if (event === "stop") {
       const s = load(f) || { start: Date.now() - 6e5, paths: [] };
       const cwd = s.cwd || cwdOf(input);
       const { lines, urgent, failed, pending, handled } = await runStop(s, cwd);
-      store(f, pending.length ? { ...s, cwd, open: false, gaps: [], paths: pending, unknown: [], done: { ...s.done, ...handled } } : { start: Date.now(), turnAt: s.turnAt, cwd, open: false, paths: [], done: handled });
+      store(f, pending.length ? { ...s, cwd, open: false, gaps: [], paths: pending, unknown: [], maybe: [], notes: [], done: { ...s.done, ...handled } } : { start: Date.now(), turnAt: s.turnAt, cwd, open: false, active: false, paths: [], done: handled });
       if (lines.length) note(lines.join(" / "));
       if (lines.length) {
         const message = "html-doc-kit: " + lines.join("\n");
