@@ -8,8 +8,33 @@ import {VERSION} from './core.mjs';
 
 const START = '<!-- html-doc-kit:start -->';
 const END = '<!-- html-doc-kit:end -->';
-const MARK = 'doc-kit.mjs';
-const skillSource = () => path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const ALL_AGENTS = ['claude', 'codex', 'cursor'];
+const AGENT_NAMES = {claude: 'Claude Code', codex: 'Codex', cursor: 'Cursor'};
+// 우리가 넣은 훅 명령의 모양. 같은 실행 파일을 쓰는 사용자 명령(check 등)은 건드리지 않는다
+const OUR_COMMAND = /doc-kit\.mjs"?\s+hook\s/;
+const isOurCommand = (c) => typeof c === 'string' && OUR_COMMAND.test(c);
+// 그룹이 아니라 항목 단위로 뺀다. 같은 그룹의 사용자 훅은 남는다
+function stripOurs(list) {
+  if (!Array.isArray(list)) return [];
+  return list.flatMap((h) => {
+    if (isOurCommand(h?.command)) return [];
+    if (!Array.isArray(h?.hooks)) return [h];
+    const hooks = h.hooks.filter((x) => !isOurCommand(x?.command));
+    return hooks.length === h.hooks.length ? [h] : hooks.length ? [{...h, hooks}] : [];
+  });
+}
+const hasOurs = (list) => Array.isArray(list) && list.some((h) => isOurCommand(h?.command) || (Array.isArray(h?.hooks) && h.hooks.some((x) => isOurCommand(x?.command))));
+const samePath = (a, b) => {
+  const real = (f) => {
+    try {
+      return fs.realpathSync(f);
+    } catch {
+      return path.resolve(f);
+    }
+  };
+  return real(a) === real(b);
+};
+const isSkill = (d) => fs.existsSync(path.join(d, 'SKILL.md')) && fs.existsSync(path.join(d, 'scripts', 'doc-kit.mjs'));
 const readJson = (f, fallback) => {
   try {
     return JSON.parse(fs.readFileSync(f, 'utf-8'));
@@ -18,10 +43,15 @@ const readJson = (f, fallback) => {
     throw new Error(`${f}를 읽지 못해 건드리지 않았습니다: ${e.message}`);
   }
 };
+// 처음 고칠 때 .doc-kit-bak을, 그 뒤로 내용이 바뀔 때마다 시각을 붙인 백업을 남긴다
 const writeJson = (f, v) => {
   fs.mkdirSync(path.dirname(f), {recursive: true});
-  if (fs.existsSync(f) && !fs.existsSync(f + '.doc-kit-bak')) fs.copyFileSync(f, f + '.doc-kit-bak');
-  fs.writeFileSync(f, JSON.stringify(v, null, 2) + '\n');
+  const text = JSON.stringify(v, null, 2) + '\n';
+  if (fs.existsSync(f)) {
+    if (fs.readFileSync(f, 'utf-8') === text) return;
+    fs.copyFileSync(f, fs.existsSync(f + '.doc-kit-bak') ? `${f}.doc-kit-bak.${Date.now()}` : f + '.doc-kit-bak');
+  }
+  fs.writeFileSync(f, text);
 };
 function rules(cli) {
   return `HTML 문서(보고서, 장표, 회의록, 소개 자료 등 사람이 읽는 HTML 파일)를 만들거나 고칠 때는 html-doc-kit 스킬을 쓴다. Artifact나 다른 게시 기능이 아니라 작업 폴더의 파일로 만든다.
@@ -34,7 +64,7 @@ function upsertBlock(file, text) {
   fs.mkdirSync(path.dirname(file), {recursive: true});
   let s = fs.existsSync(file) ? fs.readFileSync(file, 'utf-8') : '';
   const block = `${START}\n${text}\n${END}\n`;
-  if (s.includes(START)) s = s.replace(new RegExp(`${START}[\\s\\S]*?${END}\\n?`), block);
+  if (s.includes(START)) s = s.replace(new RegExp(`${START}[\\s\\S]*?${END}\\n?`), () => block);
   else s = s + (s && !s.endsWith('\n') ? '\n' : '') + (s ? '\n' : '') + block;
   fs.writeFileSync(file, s);
 }
@@ -44,10 +74,9 @@ function dropBlock(file) {
   if (s.includes(START)) fs.writeFileSync(file, s.replace(new RegExp(`\\n?${START}[\\s\\S]*?${END}\\n?`), ''));
 }
 const nestedHook = (cmd, matcher) => ({...(matcher ? {matcher} : {}), hooks: [{type: 'command', command: cmd, timeout: 120}]});
-const isOurs = (h) => JSON.stringify(h).includes(MARK);
 function mergeNested(cfg, event, entry) {
   cfg.hooks = cfg.hooks || {};
-  cfg.hooks[event] = [...(cfg.hooks[event] || []).filter((h) => !isOurs(h)), entry];
+  cfg.hooks[event] = [...stripOurs(cfg.hooks[event]), entry];
 }
 function paths(home) {
   return {
@@ -63,30 +92,66 @@ function paths(home) {
     codexConfig: path.join(home, '.codex', 'config.toml'),
   };
 }
+const HOOK_EVENTS = {
+  claude: ['UserPromptSubmit', 'PostToolUse', 'Stop'],
+  codex: ['UserPromptSubmit', 'PostToolUse', 'Stop'],
+  cursor: ['beforeSubmitPrompt', 'afterFileEdit', 'afterShellExecution', 'stop'],
+};
+const hookFile = (p, a) => ({claude: p.claudeSettings, codex: p.codexHooks, cursor: p.cursorHooks})[a];
+const instructionFile = (p, a) => ({claude: p.claudeMd, codex: p.codexMd, cursor: p.cursorRule})[a];
+const skillDir = (p, a) => (a === 'claude' ? p.claudeSkill : p.agentsSkill);
+// 설정 파일을 못 읽어도 점검과 제거는 계속한다. 이 에이전트에 우리 훅이 있는지만 본다
+function hooksOf(p, a) {
+  try {
+    return readJson(hookFile(p, a), {}).hooks || {};
+  } catch {
+    return {};
+  }
+}
+const isInstalled = (p, a) => Object.values(hooksOf(p, a)).some(hasOurs);
+function checkAgents(agents) {
+  const bad = agents.filter((a) => !ALL_AGENTS.includes(a));
+  if (bad.length) throw new Error(`알 수 없는 에이전트입니다: ${bad.join(', ')} (${ALL_AGENTS.join(', ')} 중에서 고르세요)`);
+}
 
-export function install({home = os.homedir(), agents = ['claude', 'codex', 'cursor']} = {}) {
+// 설치할 스킬 원본을 찾는다. 설치된 실행 파일(~/.doc-kit/bin)에서 돌려도 찾을 수 있어야 한다
+function findSource(p) {
+  const here = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+  const src = [here, p.claudeSkill, p.agentsSkill].find(isSkill);
+  if (!src) throw new Error('스킬 원본을 찾지 못해 아무것도 바꾸지 않았습니다. skill/html-doc-kit/scripts/doc-kit.mjs로 설치하세요');
+  return src;
+}
+// 임시 폴더에 다 복사한 뒤 바꿔 넣는다. 복사가 실패해도 있던 스킬은 남는다. 설치된 위치에서 돌리면 그대로 둔다
+function copySkill(src, to) {
+  if (samePath(src, to)) return;
+  fs.mkdirSync(path.dirname(to), {recursive: true});
+  const tmp = `${to}.tmp-${process.pid}`;
+  fs.rmSync(tmp, {recursive: true, force: true});
+  fs.cpSync(src, tmp, {recursive: true});
+  fs.rmSync(to, {recursive: true, force: true});
+  fs.renameSync(tmp, to);
+}
+
+export function install({home = os.homedir(), agents = ALL_AGENTS} = {}) {
+  checkAgents(agents);
   const p = paths(home);
-  const src = skillSource();
+  const src = findSource(p);
   const node = process.execPath;
   fs.mkdirSync(path.dirname(p.bin), {recursive: true});
-  fs.copyFileSync(path.join(src, 'scripts', 'doc-kit.mjs'), p.bin);
+  if (!samePath(path.join(src, 'scripts', 'doc-kit.mjs'), p.bin)) fs.copyFileSync(path.join(src, 'scripts', 'doc-kit.mjs'), p.bin);
   const cmd = (a, e) => `"${node}" "${p.bin}" hook ${a} ${e}`;
-  const copySkill = (to) => {
-    fs.rmSync(to, {recursive: true, force: true});
-    fs.cpSync(src, to, {recursive: true});
-  };
   const done = [];
   if (agents.includes('claude')) {
-    copySkill(p.claudeSkill);
+    copySkill(src, p.claudeSkill);
     const c = readJson(p.claudeSettings, {});
     mergeNested(c, 'UserPromptSubmit', nestedHook(cmd('claude', 'prompt')));
     mergeNested(c, 'PostToolUse', nestedHook(cmd('claude', 'post'), 'Write|Edit|MultiEdit|Bash'));
     mergeNested(c, 'Stop', nestedHook(cmd('claude', 'stop')));
     writeJson(p.claudeSettings, c);
     upsertBlock(p.claudeMd, rules(p.bin));
-    done.push('Claude Code');
+    done.push(AGENT_NAMES.claude);
   }
-  if (agents.includes('codex') || agents.includes('cursor')) copySkill(p.agentsSkill);
+  if (agents.includes('codex') || agents.includes('cursor')) copySkill(src, p.agentsSkill);
   if (agents.includes('codex')) {
     const c = readJson(p.codexHooks, {});
     mergeNested(c, 'UserPromptSubmit', nestedHook(cmd('codex', 'prompt')));
@@ -94,47 +159,56 @@ export function install({home = os.homedir(), agents = ['claude', 'codex', 'curs
     mergeNested(c, 'Stop', nestedHook(cmd('codex', 'stop')));
     writeJson(p.codexHooks, c);
     upsertBlock(p.codexMd, rules(p.bin));
-    done.push('Codex');
+    done.push(AGENT_NAMES.codex);
   }
   if (agents.includes('cursor')) {
     const c = readJson(p.cursorHooks, {version: 1, hooks: {}});
     c.version = c.version || 1;
     c.hooks = c.hooks || {};
     for (const [event, name] of [['beforeSubmitPrompt', 'prompt'], ['afterFileEdit', 'post'], ['afterShellExecution', 'post'], ['stop', 'stop']]) {
-      c.hooks[event] = [...(c.hooks[event] || []).filter((h) => !isOurs(h)), {command: cmd('cursor', name)}];
+      c.hooks[event] = [...stripOurs(c.hooks[event]), {command: cmd('cursor', name)}];
     }
     writeJson(p.cursorHooks, c);
     fs.mkdirSync(path.dirname(p.cursorRule), {recursive: true});
     fs.writeFileSync(p.cursorRule, `---\ndescription: HTML 문서를 만들 때 html-doc-kit을 쓴다\nalwaysApply: true\n---\n${rules(p.bin)}\n`);
-    done.push('Cursor');
+    done.push(AGENT_NAMES.cursor);
   }
   return done;
 }
 
-export function uninstall({home = os.homedir()} = {}) {
+// 고른 에이전트 몫만 지운다. 함께 쓰는 스킬 폴더와 실행 파일은 쓰는 에이전트가 남아 있지 않을 때만 지운다
+export function uninstall({home = os.homedir(), agents = ALL_AGENTS} = {}) {
+  checkAgents(agents);
   const p = paths(home);
-  [p.claudeSkill, p.agentsSkill].forEach((d) => fs.rmSync(d, {recursive: true, force: true}));
-  for (const f of [p.claudeSettings, p.codexHooks]) {
+  for (const a of agents) {
+    const f = hookFile(p, a);
     if (!fs.existsSync(f)) continue;
     const c = readJson(f, {});
     for (const e of Object.keys(c.hooks || {})) {
-      c.hooks[e] = c.hooks[e].filter((h) => !isOurs(h));
+      if (!Array.isArray(c.hooks[e])) continue;
+      c.hooks[e] = stripOurs(c.hooks[e]);
       if (!c.hooks[e].length) delete c.hooks[e];
     }
     writeJson(f, c);
   }
-  if (fs.existsSync(p.cursorHooks)) {
-    const c = readJson(p.cursorHooks, {});
-    for (const e of Object.keys(c.hooks || {})) c.hooks[e] = c.hooks[e].filter((h) => !isOurs(h));
-    writeJson(p.cursorHooks, c);
+  if (agents.includes('claude')) {
+    dropBlock(p.claudeMd);
+    fs.rmSync(p.claudeSkill, {recursive: true, force: true});
   }
-  dropBlock(p.claudeMd);
-  dropBlock(p.codexMd);
-  fs.rmSync(p.cursorRule, {force: true});
-  fs.rmSync(p.bin, {force: true});
+  if (agents.includes('codex')) dropBlock(p.codexMd);
+  if (agents.includes('cursor')) fs.rmSync(p.cursorRule, {force: true});
+  if (!isInstalled(p, 'codex') && !isInstalled(p, 'cursor')) fs.rmSync(p.agentsSkill, {recursive: true, force: true});
+  if (!ALL_AGENTS.some((a) => isInstalled(p, a))) fs.rmSync(p.bin, {force: true});
+  return agents.map((a) => AGENT_NAMES[a]);
 }
 
-export function doctor({home = os.homedir()} = {}) {
+// Codex 승인 키는 설정 파일 경로:이벤트:번호 꼴이다. 전역 훅 키는 실제 승인으로 아직 확인하지 못했다
+const CODEX_EVENTS = {prompt: 'user_prompt_submit', post: 'post_tool_use', stop: 'stop'};
+const codexTrusted = (conf, event) => new RegExp(`\\[hooks\\.state\\."[^"]*\\.codex/hooks\\.json:${event}:[^"]*"\\]\\s*\\n\\s*trusted_hash`, 'i').test(conf);
+
+// agents를 주지 않으면 설치 흔적이 있는 에이전트를 본다. 흔적이 하나도 없으면 전부 본다
+export function doctor({home = os.homedir(), agents} = {}) {
+  if (agents) checkAgents(agents);
   const p = paths(home);
   const lines = [];
   const say = (ok, m) => lines.push(`${ok === true ? '정상' : ok === false ? '문제' : '주의'}  ${m}`);
@@ -143,18 +217,29 @@ export function doctor({home = os.homedir()} = {}) {
   const chrome = findChrome();
   say(chrome ? true : null, chrome ? `브라우저 시험: ${chrome}` : '브라우저를 찾지 못해 C6이 미실행됩니다');
   say(fs.existsSync(p.bin), `실행 파일 ${p.bin} (키트 ${VERSION})`);
-  const hooked = (f) => fs.existsSync(f) && fs.readFileSync(f, 'utf-8').includes(MARK);
+  const hasRules = (a) => {
+    const f = instructionFile(p, a);
+    return fs.existsSync(f) && fs.readFileSync(f, 'utf-8').includes('html-doc-kit');
+  };
+  const traced = ALL_AGENTS.filter((a) => isInstalled(p, a) || hasRules(a));
+  const targets = agents || (traced.length ? traced : ALL_AGENTS);
   const nodeOk = (f) => {
     const m = /"([^"]+)" "[^"]*doc-kit\.mjs"/.exec(fs.existsSync(f) ? fs.readFileSync(f, 'utf-8').replace(/\\"/g, '"') : '');
     return !m || fs.existsSync(m[1]);
   };
-  for (const [name, skill, hooks, md] of [['Claude Code', p.claudeSkill, p.claudeSettings, p.claudeMd], ['Codex', p.agentsSkill, p.codexHooks, p.codexMd], ['Cursor', p.agentsSkill, p.cursorHooks, p.cursorRule]]) {
-    say(fs.existsSync(path.join(skill, 'SKILL.md')), `${name} 스킬 ${skill}`);
-    say(hooked(hooks) && nodeOk(hooks), `${name} 훅 ${hooks}`);
-    say(fs.existsSync(md) && fs.readFileSync(md, 'utf-8').includes('html-doc-kit'), `${name} 지침 ${md}`);
+  for (const a of targets) {
+    const f = hookFile(p, a);
+    say(isSkill(skillDir(p, a)), `${AGENT_NAMES[a]} 스킬 ${skillDir(p, a)}`);
+    const hooks = hooksOf(p, a);
+    const missing = HOOK_EVENTS[a].filter((e) => !hasOurs(hooks[e]));
+    const lost = nodeOk(f) ? '' : ', Node 경로 없음';
+    say(!missing.length && !lost, `${AGENT_NAMES[a]} 훅 ${f}${missing.length ? ` (없음: ${missing.join(', ')})` : ''}${lost}`);
+    say(hasRules(a), `${AGENT_NAMES[a]} 지침 ${instructionFile(p, a)}`);
   }
-  const conf = fs.existsSync(p.codexConfig) ? fs.readFileSync(p.codexConfig, 'utf-8') : '';
-  const trusted = /hooks\.state\."[^"]*\.codex\/hooks\.json[^"]*stop[^"]*"\]\s*\n\s*trusted_hash/i.test(conf);
-  say(trusted ? true : null, trusted ? 'Codex 훅 승인됨' : 'Codex 훅 승인 필요: 터미널에서 codex를 실행해 훅 승인 안내를 따르세요. 승인 전에는 Codex에서 자동 복구가 돌지 않습니다');
+  if (targets.includes('codex')) {
+    const conf = fs.existsSync(p.codexConfig) ? fs.readFileSync(p.codexConfig, 'utf-8') : '';
+    const waiting = Object.entries(CODEX_EVENTS).filter(([, event]) => !codexTrusted(conf, event)).map(([name]) => name);
+    say(waiting.length === 0, waiting.length ? `Codex 훅 승인 필요(${waiting.join(', ')}): 터미널에서 codex를 실행해 훅 승인 안내를 따르세요. 승인 전에는 Codex에서 자동 복구가 돌지 않습니다. Codex를 쓰지 않으면 uninstall --agents codex로 빼세요` : 'Codex 훅 승인됨(prompt, post, stop)');
+  }
   return lines;
 }

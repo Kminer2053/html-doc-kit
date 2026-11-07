@@ -91,9 +91,9 @@ try {
   } else if (cmd === 'install') {
     console.log(`설치: ${install(o).join(', ')}`);
     doctor(o).forEach((l) => console.log(l));
+    console.log('참고: 세 에이전트에서 훅이 실제로 도는지는 아직 실측 전입니다(보장 아님). 자세한 범위는 README를 보세요');
   } else if (cmd === 'uninstall') {
-    uninstall(o);
-    console.log('제거했습니다');
+    console.log(`제거: ${uninstall(o).join(', ')}`);
   } else if (cmd === 'doctor') {
     const lines = doctor(o);
     lines.forEach((l) => console.log(l));
