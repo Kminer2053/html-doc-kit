@@ -401,15 +401,30 @@ for (const [name, css, html] of [
   const slow = ef('slow.html');
   fs.writeFileSync(slow, doc);
   const r = run('ensure', slow);
-  ok('42 준비 시간 초과: 미실행으로 알리고 스타일 유지', r.status === 0 && r.stdout.includes('미실행') && r.stdout.includes('준비 시간 초과') && !r.stdout.includes('버리고') && has(slow, '80px'), r.stdout + r.stderr);
+  // 뷰어는 그림을 5초까지만 기다리므로 응답 없는 그림 서버가 있어도 완성된다
+  ok('42 응답 없는 그림: 상한 뒤 완성되고 스타일 유지', r.status === 0 && r.stdout.includes('완성') && !r.stdout.includes('버리고') && has(slow, '80px'), r.stdout + r.stderr);
   const chrome = findChrome();
   const wrapper = ef('chrome-dies.sh');
   fs.writeFileSync(wrapper, `#!/bin/sh\n"${chrome}" "$@" &\np=$!\nsleep 2\nkill -9 $p\n`, {mode: 0o755});
+  // 스크립트가 꺼진 브라우저에서는 준비 표시가 서지 않는다. 미실행으로 알리고 스타일을 둔다
+  const noScript = ef('chrome-noscript.sh');
+  fs.writeFileSync(noScript, `#!/bin/sh\nexec "${chrome}" --blink-settings=scriptEnabled=false "$@"\n`, {mode: 0o755});
+  const never = ef('never.html');
+  fs.writeFileSync(never, plain('<style>h1{font-size:80px}</style>', `<h1>${WORD}</h1><p>글</p>`));
+  const n = spawnSync('node', [CLI, 'ensure', never], {encoding: 'utf-8', env: {...process.env, DOC_KIT_CHROME: noScript}});
+  ok('42 준비 시간 초과: 미실행으로 알리고 스타일 유지', n.status === 0 && n.stdout.includes('미실행') && n.stdout.includes('준비 시간 초과') && !n.stdout.includes('버리고') && has(never, '80px'), n.stdout + n.stderr);
   const dies = ef('dies.html');
   fs.writeFileSync(dies, doc);
   const d = spawnSync('node', [CLI, 'ensure', dies], {encoding: 'utf-8', env: {...process.env, DOC_KIT_CHROME: wrapper}});
   ok('9 띄운 뒤 브라우저가 죽으면 fail, 스타일은 유지', d.status === 1 && d.stderr.includes('미완성') && !d.stdout.includes('버리고') && has(dies, '80px'), d.stdout + d.stderr);
   server.close();
+  // 띄우기 실패만 미실행이다. 문서 탓이 아니므로 완성 판정은 C1~C5로 하고 스타일도 그대로 둔다
+  const noStart = ef('chrome-no-start.sh');
+  fs.writeFileSync(noStart, '#!/bin/sh\nexit 1\n', {mode: 0o755});
+  const quiet = ef('nostart.html');
+  fs.writeFileSync(quiet, doc);
+  const q = spawnSync('node', [CLI, 'ensure', quiet], {encoding: 'utf-8', env: {...process.env, DOC_KIT_CHROME: noStart}});
+  ok('9 브라우저를 못 띄우면 미실행, 스타일은 유지', q.status === 0 && q.stdout.includes('미실행') && !q.stdout.includes('버리고') && has(quiet, '80px'), q.stdout + q.stderr);
 }
 // 25: 브라우저 없이도 전체 숨김 CSS는 버린다. 인쇄 전용 규칙은 건드리지 않는다
 {
@@ -522,7 +537,7 @@ fs.mkdirSync(path.join(proj, 'coverage'), {recursive: true});
 const cov = path.join(proj, 'coverage', 'index.html');
 fs.writeFileSync(cov, plain('', '<table></table>'));
 const tmpl = path.join(proj, 'mail.html');
-fs.writeFileSync(tmpl, plain('', '<p>{{ name }}</p>'));
+fs.writeFileSync(tmpl, plain('', '<p>{% if name %}이름{% endif %}</p>'));
 const outside = path.join(HK, 'outside', 'desk.html');
 fs.mkdirSync(path.dirname(outside), {recursive: true});
 fs.writeFileSync(outside, plain('', `<h1>${WORD}</h1>`));
@@ -594,10 +609,502 @@ run('install', '--home', ih);
 const cl = JSON.parse(fs.readFileSync(path.join(ih, '.claude/settings.json'), 'utf-8'));
 ok('설치: 기존 설정 보존, 두 번 설치해도 중복 없음', cl.theme === 'dark' && cl.hooks.Stop.length === 2 && JSON.stringify(cl.hooks.Stop).includes('mine') && cl.hooks.UserPromptSubmit.length === 1);
 ok('설치: 스킬·지침 세 곳', ['.claude/skills/html-doc-kit/SKILL.md', '.agents/skills/html-doc-kit/SKILL.md', '.cursor/rules/html-doc-kit.mdc', '.codex/AGENTS.md'].every((x) => fs.existsSync(path.join(ih, x))) && fs.readFileSync(path.join(ih, '.claude/CLAUDE.md'), 'utf-8').includes('# 내 지침'));
-ok('doctor', run('doctor', '--home', ih).status === 0, run('doctor', '--home', ih).stdout.split('\n').filter((l) => l.startsWith('문제')).join(' '));
+// 13: Codex 미승인은 문제다. 세 훅이 모두 승인돼야 통과한다
+{
+  const d0 = run('doctor', '--home', ih);
+  ok('13 doctor: Codex 미승인이면 rc=1', d0.status === 1 && d0.stdout.includes('문제  Codex 훅 승인 필요'), d0.stdout);
+  const cfg = path.join(ih, '.codex/config.toml');
+  const trust = (ev) => `[hooks.state."${ih}/.codex/hooks.json:${ev}:0:0"]\ntrusted_hash = "sha256:a"\n\n`;
+  fs.writeFileSync(cfg, trust('stop'));
+  const d1 = run('doctor', '--home', ih);
+  ok('13 doctor: stop만 승인이면 아직 rc=1', d1.status === 1 && d1.stdout.includes('prompt, post'), d1.stdout);
+  fs.writeFileSync(cfg, trust('user_prompt_submit') + trust('post_tool_use') + trust('stop'));
+  const d2 = run('doctor', '--home', ih);
+  ok('doctor', d2.status === 0, d2.stdout.split('\n').filter((l) => l.startsWith('문제')).join(' '));
+  const h = path.join(ih, '.codex/hooks.json');
+  const saved = fs.readFileSync(h);
+  const cut = JSON.parse(saved);
+  delete cut.hooks.PostToolUse;
+  fs.writeFileSync(h, JSON.stringify(cut));
+  const d3 = run('doctor', '--home', ih);
+  ok('13 doctor: 훅 하나가 빠지면 문제', d3.status === 1 && d3.stdout.includes('없음: PostToolUse'), d3.stdout);
+  fs.writeFileSync(h, saved);
+}
 run('uninstall', '--home', ih);
 const cl2 = JSON.parse(fs.readFileSync(path.join(ih, '.claude/settings.json'), 'utf-8'));
 ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2.hooks) === JSON.stringify(keep.hooks) && fs.readFileSync(path.join(ih, '.claude/CLAUDE.md'), 'utf-8').trim() === '# 내 지침' && !fs.existsSync(path.join(ih, '.claude/skills/html-doc-kit')));
+
+// === 훅·설치 회귀. 대부분 브라우저 없이(C6 미실행) 빠르게 돈다
+{
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-hook2-'));
+  const hhome = path.join(root, 'home');
+  const hasKit = (f) => fs.existsSync(f) && fs.readFileSync(f, 'latin1').includes('dk-kit-code');
+  const size = (f) => fs.statSync(f).size;
+  const noChrome = path.join(root, 'no-chrome.sh');
+  fs.writeFileSync(noChrome, '', {mode: 0o644}); // 실행 권한이 없어 바로 실패한다(띄우기 실패 = 미실행)
+  const fast = {...process.env, DOC_KIT_HOME: hhome, DOC_KIT_CHROME: noChrome};
+  const hk = (agent, event, input, e = fast) => spawnSync('node', [CLI, 'hook', agent, event], {encoding: 'utf-8', env: e, input: JSON.stringify(input)});
+  let n = 0;
+  const session = () => {
+    const dir = path.join(root, `p${++n}`);
+    fs.mkdirSync(dir, {recursive: true});
+    const id = {session_id: `s${n}`, cwd: dir};
+    const put = (rel, text = plain('', `<h1>${WORD}</h1>`)) => {
+      const f = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(f), {recursive: true});
+      fs.writeFileSync(f, text);
+      return f;
+    };
+    return {
+      dir,
+      put,
+      prompt: () => hk('claude', 'prompt', id),
+      write: (rel, text) => {
+        const f = put(rel, text);
+        hk('claude', 'post', {...id, tool_name: 'Write', tool_input: {file_path: f}});
+        return f;
+      },
+      bash: (command) => hk('claude', 'post', {...id, tool_name: 'Bash', tool_input: {command}}),
+      stop: () => hk('claude', 'stop', id).stdout,
+    };
+  };
+
+  // 1: 끝날 때 훅이 돌지 못한 턴의 파일을 다음 끝날 때 복구한다
+  {
+    const s = session();
+    s.prompt();
+    const intr = s.write('intr.html');
+    s.prompt();
+    const out = s.stop();
+    ok('1 중단된 턴의 파일을 다음 Stop에서 복구', hasKit(intr) && out.includes('intr.html'), out);
+    const bg = s.put('bg.html');
+    s.prompt();
+    s.stop();
+    ok('1 Stop 뒤에 쓴 파일도 다음 Stop에서 복구', hasKit(bg));
+    const quiet = s.put('later.html');
+    const before = fs.statSync(quiet).mtimeMs;
+    s.prompt();
+    const f = fs.readdirSync(path.join(hhome, '.doc-kit/state')).length;
+    ok('1 prompt는 파일을 바꾸지 않음', before === fs.statSync(quiet).mtimeMs && f > 0);
+    s.stop();
+    const sf = fs.readdirSync(path.join(hhome, '.doc-kit/state')).map((x) => JSON.parse(fs.readFileSync(path.join(hhome, '.doc-kit/state', x), 'utf-8'))).find((x) => x.cwd === s.dir);
+    const old = Date.now() - 13 * 3600 * 1000;
+    const stale = {...sf, start: old};
+    const stateName = fs.readdirSync(path.join(hhome, '.doc-kit/state')).find((x) => JSON.parse(fs.readFileSync(path.join(hhome, '.doc-kit/state', x), 'utf-8')).cwd === s.dir);
+    fs.writeFileSync(path.join(hhome, '.doc-kit/state', stateName), JSON.stringify(stale));
+    const oldHand = s.put('hand.html');
+    fs.utimesSync(oldHand, new Date(old + 3600000), new Date(old + 3600000));
+    s.prompt();
+    s.stop();
+    ok('1 12시간 넘은 세션은 그동안 바뀐 파일까지 쓸어 담지 않음', !hasKit(oldHand));
+  }
+
+  // 4·26: 템플릿 판정을 좁히고, 그래도 건너뛰면 알린다
+  {
+    const s = session();
+    s.prompt();
+    const py = s.put('py.html', plain('<style>body {{ margin:0 }}</style>', '<h1>보고서</h1>'));
+    const blank = s.put('blank.html', plain('', '<p>{{회사명}} 귀하</p>'));
+    const pct = s.put('lt.html', plain('', '<p>성장률 <% 기준</p>'));
+    const jinja = s.write('jinja.html', plain('', '<p>{% if a %}글{% endif %}</p>'));
+    const hbs = s.put('hbs.html', plain('', '<p>{{#if a}}글{{/if}}</p>'));
+    const out = s.stop();
+    ok('4 CSS의 {{와 빈칸 표시는 문서로 처리', hasKit(py) && hasKit(blank) && hasKit(pct), out);
+    ok('4·26 템플릿 지시문은 건너뛰고 알림', !hasKit(jinja) && !hasKit(hbs) && out.includes('템플릿으로 보여') && out.includes('jinja.html'), out);
+  }
+
+  // 10·26: out, target, vendor는 앱 신호가 아니다. 제외는 이유를 알린다. 위쪽 package.json은 작업 폴더까지만 본다
+  {
+    const s = session();
+    s.prompt();
+    const a = s.write('out/report.html');
+    const b = s.write('vendor/v.html');
+    const c = s.write('target/t.html');
+    const d = s.write('dist/x.html');
+    const out = s.stop();
+    ok('10 out, target, vendor는 입힘', hasKit(a) && hasKit(b) && hasKit(c), out);
+    ok('10 앱 폴더에 도구로 쓴 파일은 제외 이유를 알림', !hasKit(d) && out.includes('제외:') && out.includes('dist'), out);
+    const up = path.join(root, `up${n}`);
+    fs.mkdirSync(path.join(up, 'a', 'b'), {recursive: true});
+    fs.writeFileSync(path.join(up, 'package.json'), JSON.stringify({devDependencies: {vite: '^6'}}));
+    const uid = {session_id: `up${n}`, cwd: path.join(up, 'a', 'b')};
+    hk('claude', 'prompt', uid);
+    const upf = path.join(up, 'a', 'b', 'up.html');
+    fs.writeFileSync(upf, plain('', `<h1>${WORD}</h1>`));
+    hk('claude', 'stop', uid);
+    ok('10 .git이 없으면 작업 폴더 위의 package.json은 보지 않음', hasKit(upf));
+    const s2 = session();
+    s2.prompt();
+    const many = Array.from({length: 12}, (_, i) => s2.write(`dist/d${i}.html`));
+    const o2 = s2.stop();
+    ok('10 제외 알림 줄 수 상한', many.every((f) => !hasKit(f)) && o2.includes('그 밖에 넣지 않은 파일 4개'), o2.slice(0, 200));
+  }
+
+  // 5: 본문 파일 면제는 .doc-kit 안만
+  {
+    const s = session();
+    const body = '<!-- html-doc-kit 본문 파일: 고친 뒤 apply 하세요 -->\n<section data-page><p>본문</p></section>';
+    s.prompt();
+    const inside = s.write('.doc-kit/r.body.html', body);
+    const final = s.write('최종.html', body);
+    const out = s.stop();
+    ok('5 .doc-kit 안의 본문 파일은 그대로', fs.readFileSync(inside, 'utf-8') === body);
+    ok('5 그 밖의 본문 파일은 입히지 않고 apply 필요를 알림', fs.readFileSync(final, 'utf-8') === body && out.includes('apply가 필요합니다') && out.includes('최종.html'), out);
+    const kitDoc = s.put('r.html', plain('', '<h1>x</h1>'));
+    run('ensure', '--no-browser', kitDoc);
+    s.prompt();
+    run('extract', kitDoc);
+    const bodyFile = path.join(s.dir, '.doc-kit', 'r.body.html');
+    hk('claude', 'post', {session_id: `s${n}`, cwd: s.dir, tool_name: 'Edit', tool_input: {file_path: bodyFile}});
+    const o2 = s.stop();
+    ok('5 본문을 고치고 apply를 잊으면 알림', o2.includes('apply가 필요합니다'), o2);
+  }
+
+  // 6: 흔한 셸 경로
+  {
+    const s = session();
+    const away = path.join(root, `away${n}`);
+    const desk = path.join(hhome, 'Desktop');
+    fs.mkdirSync(away, {recursive: true});
+    fs.mkdirSync(desk, {recursive: true});
+    const body = plain('', `<h1>${WORD}</h1>`);
+    const q = (p) => `"${p}"`;
+    s.prompt();
+    const spaced = path.join(away, '내 보고서.html');
+    fs.writeFileSync(spaced, body);
+    s.bash(`echo hi > ${q(spaced)}`);
+    const viaHome = path.join(desk, 'b.html');
+    fs.writeFileSync(viaHome, body);
+    s.bash('cat > $HOME/Desktop/b.html <<EOF\n<p>a > 무시.html</p>\nEOF');
+    const viaBrace = path.join(hhome, 'b2.html');
+    fs.writeFileSync(viaBrace, body);
+    s.bash('echo hi > "${HOME}/b2.html"');
+    const viaCd = path.join(away, 'c.html');
+    fs.writeFileSync(viaCd, body);
+    s.bash(`cd ${q(away)} && echo hi > c.html`);
+    const viaCpDir = path.join(away, 'd.html');
+    fs.writeFileSync(viaCpDir, body);
+    s.bash(`cp src.html ${q(away)}/`);
+    fs.writeFileSync(path.join(away, 'src.html'), body);
+    s.bash(`cp /tmp/none.html ${q(path.join(away, 'cp.html'))}`);
+    fs.writeFileSync(path.join(away, 'cp.html'), body);
+    const moved = s.write('w.html');
+    const movedTo = path.join(away, 'w2.html');
+    fs.renameSync(moved, movedTo);
+    s.bash(`mv ${q(moved)} ${q(movedTo)}`);
+    const oldTime = new Date(Date.now() - 86400000);
+    const oldFile = path.join(away, 'old_src.html');
+    fs.writeFileSync(oldFile, body);
+    fs.utimesSync(oldFile, oldTime, oldTime);
+    const oldTo = path.join(s.dir, 'old.html');
+    fs.renameSync(oldFile, oldTo);
+    s.bash(`mv ${q(oldFile)} ${q(oldTo)}`);
+    const out = s.stop();
+    ok('6 따옴표·공백 경로', hasKit(spaced), out);
+    ok('6 $HOME, ${HOME}, 여기 문서', hasKit(viaHome) && hasKit(viaBrace) && !out.includes('무시.html'), out);
+    ok('6 같은 명령의 cd', hasKit(viaCd));
+    ok('6 cp 대상 파일', hasKit(path.join(away, 'cp.html')));
+    ok('6 cp 대상 폴더는 파일명을 붙임', hasKit(path.join(away, 'src.html')));
+    ok('6 mv로 옮긴 파일은 새 위치에서 입히고 옛 경로는 알리지 않음', hasKit(movedTo) && !out.includes('찾지 못했습니다'), out);
+    ok('6 옛 수정 시각으로 옮겨 온 파일', hasKit(oldTo));
+    void viaCpDir;
+
+    const s2 = session();
+    s2.prompt();
+    const py = path.join(desk, 'gen.html');
+    s2.bash('python3 gen.py');
+    fs.writeFileSync(py, body);
+    const dl = path.join(hhome, 'Downloads', 'dl.html');
+    fs.mkdirSync(path.dirname(dl), {recursive: true});
+    fs.writeFileSync(dl, body);
+    const deep = path.join(desk, 'deep', 'x.html');
+    fs.mkdirSync(path.dirname(deep), {recursive: true});
+    fs.writeFileSync(deep, body);
+    s2.stop();
+    ok('6 스크립트 실행이 있으면 바탕화면·다운로드를 얕게 훑음', hasKit(py) && hasKit(dl) && !hasKit(deep));
+
+    const s3 = session();
+    s3.prompt();
+    const untouched = path.join(desk, 'quiet.html');
+    fs.writeFileSync(untouched, body);
+    s3.bash('ls -la');
+    s3.stop();
+    ok('6 HTML도 스크립트도 없는 Bash면 바탕화면을 보지 않음', !hasKit(untouched));
+
+    const s4 = session();
+    s4.prompt();
+    const gone = s4.write('gone.html');
+    fs.rmSync(gone);
+    s4.bash('echo x > "$OUT/a.html"');
+    const o4 = s4.stop();
+    ok('6 사라진 파일과 위치 미상 쓰기를 알림', o4.includes('찾지 못했습니다') && o4.includes('gone.html') && o4.includes('위치를 찾지 못한') && o4.includes('$OUT/a.html'), o4);
+    s4.prompt();
+    const rm = s4.write('tmp.html');
+    fs.rmSync(rm);
+    s4.bash(`rm -f ${q(rm)}`);
+    const o5 = s4.stop();
+    ok('6 rm으로 지운 파일은 알리지 않음', !o5.includes('tmp.html'), o5);
+  }
+
+  // 7·20·9·19·43: 알림. 사본 규칙은 유지한다
+  {
+    const cur = path.join(root, `cur${n}`);
+    fs.mkdirSync(cur, {recursive: true});
+    const cid = {conversation_id: `cu${n}`, workspace_roots: [cur]};
+    hk('cursor', 'prompt', cid);
+    const dash = path.join(cur, 'dash.html');
+    fs.writeFileSync(dash, plain('', '<h1>차트</h1><canvas></canvas><script>draw()</script>'));
+    const offf = path.join(cur, 'off.html');
+    fs.writeFileSync(offf, plain('<meta name="doc-kit" content="off">', '<p>끔</p>'));
+    const c = hk('cursor', 'stop', cid).stdout;
+    ok('7 사본 규칙은 그대로', !hasKit(dash) && hasKit(path.join(cur, 'dash_편집용.html')));
+    ok('7·20 Cursor도 사본·제외·미실행·경고를 알림', c.includes('followup_message') && c.includes('dash_편집용.html') && c.includes('off.html') && c.includes('미실행') && c.includes('경고'), c);
+
+    const s = session();
+    s.prompt();
+    const nopic = s.write('nopic.html', plain('', '<h1>글</h1><img src="없는그림.png">'));
+    const hid = s.write('hid.html', plain('<style>#dk-edit{display:none}</style>', '<h1>글</h1>'));
+    const out = s.stop();
+    ok('9 브라우저 시험 미실행을 파일마다 알림', out.includes('브라우저 시험 미실행') && out.includes('nopic.html') && out.includes('hid.html'), out);
+    ok('19 W1 경고를 훅에서 전달', out.includes('없는그림.png') && out.includes('경고(nopic.html)'), out);
+    ok('43 백업 경로를 알림', /원본: [^"\\]*\.doc-kit\/backup\/nopic\.html\.\d+/.test(out), out);
+
+    const s2 = session();
+    s2.prompt();
+    const kinds = {
+      onclick: plain('', '<button onclick="go()">눌러</button>'),
+      frame: plain('', '<h1>글</h1><iframe src="https://example.com"></iframe>'),
+      obj: plain('', '<h1>글</h1><object data="a.pdf"></object>'),
+      emb: plain('', '<h1>글</h1><embed src="a.swf">'),
+      comment: plain('', '<h1>글</h1><!-- <script>옛코드()</script> --><p>&lt;script&gt;는 글자</p>'),
+    };
+    const files = Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, s2.write(`${k}.html`, v)]));
+    const o2 = s2.stop();
+    ok('43 on*, iframe, object, embed는 제자리 대신 사본', ['onclick', 'frame', 'obj', 'emb'].every((k) => !hasKit(files[k]) && hasKit(path.join(s2.dir, `${k}_편집용.html`))), o2);
+    ok('43 주석·글자 속 script는 스크립트가 아님', hasKit(files.comment));
+
+    const s3 = session();
+    s3.prompt();
+    const dropped = s3.write('drop.html', plain('<style>*{display:none}</style>', '<h1>글</h1>'));
+    const o3 = s3.stop();
+    ok('42 CSS를 버리면 훅에서도 알림', hasKit(dropped) && o3.includes('버리고'), o3);
+  }
+
+  // 27·41·40: 스캔 범위
+  {
+    const s = session();
+    s.prompt();
+    const lib = s.put('Library/Application Support/App/page.html');
+    const dot = s.put('.cache/x/c.html');
+    const vsc = s.put('.vscode/extensions/w.html');
+    const app = s.put('AppData/Local/a.html');
+    const bld = s.put('_build/html/index.html');
+    const site = s.put('site/index.html');
+    const real = s.put('note.html');
+    s.stop();
+    ok('27·41 점 폴더, Library, AppData, _build, site는 스캔하지 않음', [lib, dot, vsc, app, bld, site].every((f) => !hasKit(f)) && hasKit(real));
+
+    // 작업 폴더가 홈이면 스캔을 끄고 도구로 쓴 파일만 본다
+    const homeId = {session_id: `home${n}`, cwd: hhome};
+    hk('claude', 'prompt', homeId);
+    const stray = path.join(hhome, 'stray.html');
+    fs.writeFileSync(stray, plain('', '<p>다른 앱</p>'));
+    const named = path.join(hhome, 'named.html');
+    fs.writeFileSync(named, plain('', '<p>도구</p>'));
+    hk('claude', 'post', {...homeId, tool_name: 'Write', tool_input: {file_path: named}});
+    hk('claude', 'stop', homeId);
+    ok('41 작업 폴더가 홈이면 스캔 없이 도구로 쓴 파일만', !hasKit(stray) && hasKit(named));
+    const rootId = {session_id: `root${n}`, cwd: '/'};
+    hk('claude', 'prompt', rootId);
+    const r = hk('claude', 'stop', rootId);
+    ok('41 작업 폴더가 루트면 스캔 없음', r.status === 0 && r.stdout.trim() === '{}', r.stdout);
+
+    // git에서 HEAD와 같은 파일은 건너뛴다
+    const g = session();
+    const git = (...a) => spawnSync('git', ['-C', g.dir, '-c', 'user.name=t', '-c', 'user.email=t@t', ...a], {encoding: 'utf-8'});
+    git('init', '-q');
+    g.put('docs/d1.html', plain('', '<p>주</p>'));
+    g.put('.gitignore', 'ignored/\n');
+    git('add', '.');
+    git('commit', '-qm', '1');
+    git('checkout', '-qb', 'f');
+    const d1 = g.put('docs/d1.html', plain('', '<p>가지</p>'));
+    git('add', '.');
+    git('commit', '-qm', '2');
+    git('checkout', '-q', '-');
+    g.prompt();
+    git('checkout', '-q', 'f');
+    const fresh = g.put('new.html');
+    const ign = g.put('ignored/i.html');
+    const gout = g.stop();
+    ok('40 git checkout으로 바뀐 파일은 입히지 않음', !hasKit(d1) && git('status', '--porcelain', '--', 'docs').stdout === '', gout);
+    ok('40 git에 없는 새 파일은 입힘', hasKit(fresh));
+    ok('40 git이 무시하는 파일은 건너뛰고 알림', !hasKit(ign) && gout.includes('git이 무시'), gout);
+
+    const m = session();
+    m.prompt();
+    const six = Array.from({length: 6}, (_, i) => m.put(`r${i}.html`));
+    const named2 = m.write('named.html');
+    const mout = m.stop();
+    ok('40 스캔으로만 찾은 파일이 5개를 넘으면 입히지 않고 목록만 알림', six.every((f) => !hasKit(f)) && mout.includes('6개') && mout.includes('r0.html'), mout);
+    ok('40 도구로 쓴 파일은 상한과 무관하게 입힘', hasKit(named2));
+    const five = session();
+    five.prompt();
+    const fv = Array.from({length: 5}, (_, i) => five.put(`r${i}.html`));
+    five.stop();
+    ok('40 5개까지는 입힘', fv.every(hasKit));
+  }
+
+  // 39: 웹 신호
+  {
+    for (const dep of ['express', 'koa', 'fastify', 'hono', 'preact', 'lit', '@sveltejs/kit', '@11ty/eleventy', 'tailwindcss']) {
+      const s = session();
+      s.put('package.json', JSON.stringify({dependencies: {[dep]: '1'}}));
+      s.prompt();
+      const f = s.write('index.html');
+      const out = s.stop();
+      ok(`39 의존성 ${dep}`, !hasKit(f) && out.includes(dep), out);
+    }
+    for (const conf of ['vite.config.mts', 'next.config.cjs', 'astro.config.ts', 'webpack.config.cjs', 'svelte.config.mjs']) {
+      const s = session();
+      s.put(conf, '');
+      s.prompt();
+      const f = s.put('index.html');
+      s.stop();
+      ok(`39 설정 ${conf}`, !hasKit(f));
+    }
+    const s = session();
+    s.prompt();
+    const fs5 = ['static/about.html', 'views/error.html', 'templates/t.html', 'partials/header.html', 'emails/welcome.html'].map((r) => s.write(r, '<div>조각</div>'));
+    s.stop();
+    ok('39 static, views, templates, partials, emails 제외', fs5.every((f) => !hasKit(f)));
+    for (const marker of ['go.mod', 'pyproject.toml', 'composer.json', 'conf.py']) {
+      const a = session();
+      a.put(marker, '');
+      a.prompt();
+      const f = a.write('index.html');
+      const before = fs.readFileSync(f);
+      const out = a.stop();
+      ok(`39 애매한 신호 ${marker}는 사본`, before.equals(fs.readFileSync(f)) && hasKit(path.join(a.dir, 'index_편집용.html')) && out.includes(marker), out);
+    }
+    const plainPkg = session();
+    plainPkg.put('package.json', JSON.stringify({dependencies: {lodash: '1'}}));
+    plainPkg.prompt();
+    const pf = plainPkg.write('report.html');
+    plainPkg.stop();
+    ok('39 웹과 무관한 package.json은 문서로 처리', hasKit(pf));
+  }
+
+  // 50: 제외 표기
+  {
+    const s = session();
+    s.put('.doc-kit.json', JSON.stringify({exclude: ['*.skip.html', 'out2/**', 'drafts/', 'exact/a.html', 'sub/*/x.html']}));
+    s.prompt();
+    const names = ['a.skip.html', 'deep/b.skip.html', 'out2/b.html', 'out2/c/d.html', 'drafts/e.html', 'exact/a.html', 'sub/k/x.html'];
+    const ex = names.map((r) => s.write(r));
+    const inc = ['a.html', 'out22/b.html', 'exact/b.html', 'sub/k/l/x.html'].map((r) => s.write(r));
+    const off = s.write('c.html', plain('<meta content="off" name="doc-kit">', '<p>끔</p>'));
+    const off2 = s.write('c2.html', plain("<meta content=OFF name='DOC-KIT'>", '<p>끔</p>'));
+    const notOff = s.write('c3.html', plain('<!-- <meta name="doc-kit" content="off"> -->', '<p>주석</p>'));
+    const out = s.stop();
+    ok('50 exclude 글롭', ex.every((f) => !hasKit(f)), ex.filter(hasKit).join());
+    ok('50 exclude에 안 맞는 파일은 입힘', inc.every(hasKit), inc.filter((f) => !hasKit(f)).join());
+    ok('50 제외 표식은 속성 순서·대소문자 무관, 주석은 표식 아님', !hasKit(off) && !hasKit(off2) && hasKit(notOff) && out.includes('c.html'), out);
+    ok('50 check도 제외로 판정', run('check', off).stdout.includes('제외됨'));
+  }
+
+  // 28: 입력 파일
+  {
+    const s = session();
+    s.prompt();
+    const inb = s.write('body.html', '<section data-page data-title="1장"><p>조각</p></section>');
+    const outp = path.join(s.dir, 'result.html');
+    spawnSync('node', [CLI, 'build', inb, '-o', outp, '--no-browser'], {encoding: 'utf-8'});
+    const size0 = size(inb);
+    const o1 = s.stop();
+    ok('28 build 입력은 입히지 않음', size(inb) === size0 && !o1.includes('body.html에'), o1);
+    s.prompt();
+    fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각 고침</p></section>');
+    fs.utimesSync(inb, new Date(Date.now() + 2000), new Date(Date.now() + 2000));
+    const o2 = s.stop();
+    ok('28 입력만 고치고 다시 만들지 않으면 알림', o2.includes('반영하지 않았습니다'), o2);
+  }
+
+  // 처리 시간이 모자라면 남은 파일을 다음 Stop으로 넘긴다
+  {
+    const s = session();
+    s.prompt();
+    const a = s.write('a1.html');
+    const b = s.write('a2.html');
+    const id = {session_id: `s${n}`, cwd: s.dir};
+    const o = hk('claude', 'stop', id, {...fast, DOC_KIT_HOOK_BUDGET_MS: '1'}).stdout;
+    const first = [a, b].filter(hasKit).length;
+    s.prompt();
+    s.stop();
+    ok('시간이 모자란 파일은 다음 Stop에서 처리', first < 2 && o.includes('다음 턴') && hasKit(a) && hasKit(b), o);
+  }
+
+  // 44·46·34·45: 설치
+  {
+    const ih2 = path.join(root, 'ihome2');
+    const ctl = (...a) => spawnSync('node', [CLI, ...a, '--home', ih2], {encoding: 'utf-8'});
+    fs.mkdirSync(path.join(ih2, '.claude'), {recursive: true});
+    const mixedCmd = `"${process.execPath}" "${ih2}/.doc-kit/bin/doc-kit.mjs" hook claude stop`;
+    const userCheck = 'node ~/.doc-kit/bin/doc-kit.mjs check x.html';
+    fs.writeFileSync(path.join(ih2, '.claude/settings.json'), JSON.stringify({hooks: {Stop: [{hooks: [{type: 'command', command: 'say done'}, {type: 'command', command: mixedCmd}]}, {hooks: [{type: 'command', command: userCheck}]}]}}));
+    ok('44 설치', ctl('install').status === 0);
+    const read = (f) => fs.readFileSync(path.join(ih2, f), 'utf-8');
+    const stopHooks = () => JSON.stringify(JSON.parse(read('.claude/settings.json')).hooks?.Stop || []);
+    ok('44 같은 그룹의 사용자 훅과 check 명령은 남고 키트 훅은 하나', stopHooks().includes('say done') && stopHooks().includes('check x.html') && stopHooks().split('hook claude stop').length === 2, stopHooks());
+    const conf = path.join(ih2, '.claude/settings.json');
+    const addMine = JSON.parse(read('.claude/settings.json'));
+    addMine.theme = 'dark';
+    fs.writeFileSync(conf, JSON.stringify(addMine));
+    ctl('install');
+    const baks = fs.readdirSync(path.join(ih2, '.claude')).filter((x) => x.startsWith('settings.json.doc-kit-bak'));
+    ok('44 고칠 때마다 시각을 붙인 백업', baks.length >= 2 && baks.includes('settings.json.doc-kit-bak'), baks.join());
+    const countBefore = fs.readdirSync(path.join(ih2, '.codex')).filter((x) => x.includes('doc-kit-bak')).length;
+    ctl('install');
+    ok('44 바뀐 것이 없으면 백업을 늘리지 않음', fs.readdirSync(path.join(ih2, '.codex')).filter((x) => x.includes('doc-kit-bak')).length === countBefore);
+
+    // 34·45: 설치된 위치에서 다시 install
+    const installedCli = path.join(ih2, '.claude/skills/html-doc-kit/scripts/doc-kit.mjs');
+    const re = spawnSync('node', [installedCli, 'install', '--home', ih2], {encoding: 'utf-8'});
+    ok('34 설치된 스킬 폴더에서 다시 설치해도 스킬이 남음', re.status === 0 && fs.existsSync(installedCli) && fs.existsSync(path.join(ih2, '.claude/skills/html-doc-kit/SKILL.md')), re.stderr);
+    const agentsCli = path.join(ih2, '.agents/skills/html-doc-kit/scripts/doc-kit.mjs');
+    const re2 = spawnSync('node', [agentsCli, 'install', '--home', ih2], {encoding: 'utf-8'});
+    ok('45 다른 쪽 스킬 폴더에서 돌려도 남음', re2.status === 0 && fs.existsSync(agentsCli) && fs.existsSync(installedCli), re2.stderr);
+    const binCli = path.join(ih2, '.doc-kit/bin/doc-kit.mjs');
+    const re3 = spawnSync('node', [binCli, 'install', '--home', ih2], {encoding: 'utf-8'});
+    ok('45 설치된 실행 파일에서 돌려도 남음', re3.status === 0 && fs.existsSync(binCli) && fs.existsSync(installedCli), re3.stderr);
+
+    // 46: 고른 에이전트만 제거
+    const bad = ctl('uninstall', '--agents', 'foo');
+    ok('46 모르는 에이전트는 거부하고 아무것도 지우지 않음', bad.status === 2 && fs.existsSync(installedCli), bad.stderr);
+    const u = ctl('uninstall', '--agents', 'cursor');
+    ok('46 cursor만 제거', u.status === 0 && u.stdout.includes('Cursor') && !u.stdout.includes('Codex') && !read('.cursor/hooks.json').includes('doc-kit.mjs') && !fs.existsSync(path.join(ih2, '.cursor/rules/html-doc-kit.mdc')), u.stdout + u.stderr);
+    ok('46 나머지는 남음', read('.claude/settings.json').includes('hook claude stop') && read('.codex/hooks.json').includes('hook codex stop') && read('.claude/CLAUDE.md').includes('html-doc-kit') && fs.existsSync(binCli) && fs.existsSync(agentsCli) && fs.existsSync(installedCli));
+    ctl('uninstall', '--agents', 'codex');
+    ok('46 공유 스킬 폴더는 쓰는 에이전트가 없어질 때 지움', !fs.existsSync(agentsCli) && fs.existsSync(binCli) && fs.existsSync(installedCli));
+    const dr = ctl('doctor');
+    ok('46 doctor는 설치된 에이전트만 봄', dr.status === 0 && !dr.stdout.includes('Codex') && !dr.stdout.includes('Cursor') && dr.stdout.includes('Claude Code'), dr.stdout);
+    ctl('uninstall', '--agents', 'claude');
+    ok('46 마지막 에이전트를 빼면 실행 파일도 지움', !fs.existsSync(binCli) && !fs.existsSync(installedCli) && stopHooks().includes('say done') && !stopHooks().includes('hook claude'), stopHooks());
+    const inst = spawnSync('node', [CLI, 'install', '--home', ih2, '--agents', 'claude'], {encoding: 'utf-8'});
+    ok('13 설치 출력에 실측 전 안내', inst.stdout.includes('실측 전'), inst.stdout);
+  }
+
+  // Chrome을 그대로 쓰는 복구 한 건: 끝까지 통과하고 45초를 기다리지 않는다
+  {
+    const s = session();
+    s.prompt();
+    const f = s.write('real.html');
+    const t0 = Date.now();
+    const id = {session_id: `s${n}`, cwd: s.dir};
+    const o = hk('claude', 'stop', id, {...process.env, DOC_KIT_HOME: hhome}).stdout;
+    ok('훅: 실제 브라우저로 입히고 알림에 미실행 없음', run('check', f).status === 0 && o.includes('real.html') && !o.includes('미실행'), `${Date.now() - t0}ms ${o}`);
+  }
+}
 
 console.log(fails ? `\n실패 ${fails}건` : '\n모두 통과');
 process.exit(fails ? 1 : 0);

@@ -13,7 +13,8 @@ const ONLY_ONE = [...KIT_TAGS, ...KIT_STYLES, 'dk-doc-style', 'dk-document', 'dk
 const BANNED = ['iframe', 'object', 'embed', 'base', 'frame', 'frameset', 'applet'];
 
 export function isOff(source) {
-  return /<meta[^>]+name=["']?doc-kit["']?[^>]+content=["']?off/i.test(source);
+  if (!/<meta\b[^>]*doc-kit/i.test(source)) return false; // 대부분의 파일은 파싱하지 않고 끝난다
+  return !!find(parse(source), (n) => n.tagName === 'meta' && (attr(n, 'name') || '').trim().toLowerCase() === 'doc-kit' && (attr(n, 'content') || '').trim().toLowerCase() === 'off');
 }
 export const newerThan = (a, b) => {
   const pa = String(a).split('.').map(Number);

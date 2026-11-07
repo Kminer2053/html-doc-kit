@@ -187,10 +187,10 @@ export async function ensure(file, opts = {}) {
   const done = await renderChecked(src, opts, warn); // 문서 CSS는 새로 만든 판도 실패할 때만 버린다
   let to = wanted;
   if (!inPlace) to = placeOutput(wanted, notices, opts);
-  else if (opts.backup !== false) backup(file);
+  const saved = inPlace && opts.backup !== false ? backup(file) : null;
   fs.writeFileSync(to, done.html);
   remember(to, done.html);
-  return {file: to, warnings: [...warnings, ...done.c6.warnings], notices, c6: done.c6, changed: true, repaired: report.errors};
+  return {file: to, warnings: [...warnings, ...done.c6.warnings], notices, c6: done.c6, changed: true, repaired: report.errors, backup: saved};
 }
 
 export async function check(file, opts = {}) {

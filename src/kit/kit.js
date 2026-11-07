@@ -6,12 +6,19 @@
   const doc = $('#dk-document');
   if (!doc) return;
   const pages = $$(':scope > .dk-page', doc);
+  // 본문 안에 같은 이름의 클래스가 있어도 쪽은 #dk-document의 직접 자식만 친다
+  const pageOf = (e) => {
+    for (let n = e; n; n = n.parentElement) if (n.parentElement === doc && n.classList.contains('dk-page')) return n;
+    return null;
+  };
   const viewport = $('#dk-viewport');
   const root = document.documentElement;
   const docId = root.dataset.docId || 'doc';
   const docRev = root.dataset.docRev || '1';
   const DRAFT_KEY = 'dk-draft:' + docId + ':' + docRev;
   const FILE_NAME = decodeURIComponent(location.pathname.split('/').pop() || '') || 'document.html';
+  const FIELD = 'input,textarea,select,datalist'; // 문서 안 입력칸. 편집 칸이 아니라 브라우저가 그대로 다룬다
+  const IMAGE_WAIT = 5000; // 응답 없는 그림·글꼴 하나 때문에 뷰어 준비가 끝없이 밀리지 않게 하는 상한(ms)
   const OVER_TOLERANCE = 3; // 처음 값보다 이만큼(px) 더 넘치거나 겹쳐야 경고한다
   const BIG_IMAGE = 200000; // 이보다 큰 새 그림은 임시 저장에 넣지 않는다(저장 공간이 모자라 글까지 못 남긴다)
   const MANY_HOSTS = 200; // 칸이 이보다 많은 쪽은 겹침을 재지 않는다(입력이 느려진다)
@@ -52,6 +59,10 @@
   let pickedImage = null;
   let drag = null;
   let suppressClick = false;
+  let fileStamp = 0; // 마지막으로 저장한 파일의 수정 시각
+  let textAfterPic = false; // 그림을 고친 뒤 글자를 고쳤는지(⌘Z를 어느 쪽에 줄지 가른다)
+  const picUndo = [];
+  const picRedo = [];
   const touched = new Set();
   const decoOf = new WeakMap();
   const overBy = pages.map(() => 0);
@@ -242,7 +253,7 @@
     const textNodes = () => {
       const out = [];
       const walker = document.createTreeWalker(top, NodeFilter.SHOW_TEXT);
-      for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.nodeValue.trim() && !n.parentElement.closest('svg,style,script,textarea')) out.push(n);
+      for (let n = walker.nextNode(); n; n = walker.nextNode()) if (n.nodeValue.trim() && !n.parentElement.closest('svg,style,script,' + FIELD)) out.push(n);
       return out;
     };
     new Set(textNodes().map((n) => n.parentElement)).forEach(wrapLooseText);
@@ -273,7 +284,8 @@
   }
   const hostOf = (t) => {
     const e = t && t.nodeType === 1 ? t : t && t.parentElement;
-    return e && e.closest ? e.closest('[data-dk-host]') : null;
+    if (!e || !e.closest || e.closest(FIELD)) return null;
+    return e.closest('[data-dk-host]');
   };
   const isNote = (h) => h === noteText || h === noteKey;
   const isFlexy = (h) => /flex|grid/.test(getComputedStyle(h).display);
@@ -301,7 +313,7 @@
 
   // ── 고친 내용 반영 ──
   function touch(el) {
-    const page = el.closest && el.closest('.dk-page');
+    const page = pageOf(el);
     if (page) touched.add(pages.indexOf(page));
     dirty = true;
     revision++;
@@ -325,7 +337,7 @@
     if (h === noteText) page.notes = h.innerText.replace(/\n+$/, '');
     else if (h === noteKey) page.key = oneLine(h);
     else {
-      const i = pages.indexOf(h.closest('.dk-page'));
+      const i = pages.indexOf(pageOf(h));
       if (i < 0) return;
       const parts = titleParts(pages[i]);
       if (!parts.some((p) => p === h || p.contains(h) || h.contains(p))) return;
@@ -349,18 +361,32 @@
       if (hasWords(h)) h.removeAttribute('data-dk-empty');
       else if (!h.hasAttribute('data-dk-empty')) h.setAttribute('data-dk-empty', getComputedStyle(h).display === 'inline' ? 'inline' : '');
     }
+    textAfterPic = true;
+    picRedo.length = 0;
     syncBook(h);
     touch(h);
   });
+  // 문서 안 입력칸에 채운 값도 고친 내용이다. 저장할 때 파일에 남긴다
+  const fieldChanged = (e) => {
+    if (e.target.closest && e.target.closest(FIELD) && pageOf(e.target)) touch(e.target);
+  };
+  document.addEventListener('input', fieldChanged);
+  document.addEventListener('change', fieldChanged);
+  // 편집 중 입력칸에서 Enter를 눌러 폼이 전송되면 페이지가 다시 열려 고친 내용을 잃는다
+  document.addEventListener('submit', (e) => {
+    if (editing && pageOf(e.target)) e.preventDefault();
+  });
   // 칸 밖으로 커서가 나가면 숨은 영역이 밀려 올라가므로, 칸에서 나오거나 글이 다시 들어오면 되돌린다
+  // 사용자가 스크롤로 보는 영역(auto 쪽의 넓은 표 등)은 입력할 때마다 튀지 않게 그대로 둔다
+  const scrollable = (v) => v === 'auto' || v === 'scroll';
   function resetScroll(page) {
     [page, ...$$('*', page)].forEach((e) => {
-      if (e.scrollTop) e.scrollTop = 0;
-      if (e.scrollLeft) e.scrollLeft = 0;
+      if (e.scrollTop && !scrollable(getComputedStyle(e).overflowY)) e.scrollTop = 0;
+      if (e.scrollLeft && !scrollable(getComputedStyle(e).overflowX)) e.scrollLeft = 0;
     });
   }
   document.addEventListener('focusout', (e) => {
-    const page = e.target.closest && e.target.closest('.dk-page');
+    const page = pageOf(e.target);
     if (page) resetScroll(page);
   });
 
@@ -399,7 +425,8 @@
     const cells = hosts.map((h, j) => {
       const b = boxes[j];
       if (!b) return [0, 0, 0, 0];
-      const out = Math.max(0, b.right - edge.right, h.closest('.page-footer,[data-dk-footer],footer') ? 0 : b.bottom - limit);
+      // 높이가 내용만큼인 쪽은 넓은 내용을 가로로 스크롤해 볼 수 있으니 오른쪽 넘침으로 치지 않는다
+      const out = Math.max(0, fixed ? b.right - edge.right : 0, h.closest('.page-footer,[data-dk-footer],footer') ? 0 : b.bottom - limit);
       const own = Math.max(h.scrollHeight - h.clientHeight, h.scrollWidth - h.clientWidth, 0);
       let box = 0;
       for (let e = h.parentElement; e && e !== top && !e.matches('.page-body,[data-dk-body],main,article'); e = e.parentElement) {
@@ -497,7 +524,7 @@
     if (editing && e.target.closest && e.target.closest('.dk-page')) e.preventDefault();
   });
   document.addEventListener('mousedown', (e) => {
-    if (!editing || !e.target.closest) return;
+    if (!editing || !e.target.closest || e.target.closest(FIELD)) return;
     // 그림은 끌어서 옮긴다
     const pic = movableOf(e.target);
     if (pic) {
@@ -540,6 +567,16 @@
       return;
     }
     const h = hostOf(e.target);
+    // 그림을 고친 일은 브라우저 기록에 없으므로 따로 되돌린다. 입력칸과, 글자를 더 고친 칸 안에서는 브라우저 몫이다
+    const redoKey = (e.code === 'KeyZ' && e.shiftKey) || (e.code === 'KeyY' && e.ctrlKey);
+    if ((e.metaKey || e.ctrlKey) && !e.altKey && (redoKey || (e.code === 'KeyZ' && !e.shiftKey)) && !(e.target.closest && e.target.closest(FIELD))) {
+      const from = redoKey ? picRedo : picUndo;
+      if (from.length && (!h || !textAfterPic)) {
+        e.preventDefault();
+        flipPic(from, redoKey ? picUndo : picRedo);
+        return;
+      }
+    }
     // 전체 선택은 칸 안 글자만(잠근 아이콘은 빼고)
     if (h && (e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.code === 'KeyA') {
       e.preventDefault();
@@ -579,7 +616,7 @@
   const imgBar = document.createElement('div');
   imgBar.className = 'dk-ui dk-float';
   imgBar.hidden = true;
-  imgBar.innerHTML = '<button data-a="swap">그림 바꾸기</button><button data-a="home">제자리로</button><input type="file" accept="image/*" hidden>';
+  imgBar.innerHTML = '<button data-a="swap">그림 바꾸기</button><button data-a="orig">원래 그림</button><button data-a="home">제자리로</button><input type="file" accept="image/*" hidden>';
   document.body.append(imgBar);
 
   function hideBars() {
@@ -659,8 +696,35 @@
     const m = /(-?[\d.]+)px\s+(-?[\d.]+)px/.exec(el.style.translate || '');
     return m ? [Number(m[1]), Number(m[2])] : [0, 0];
   };
+  // 그림 한 번 고치기 전 모습. 끌 때 풀어 준 상위 틀의 overflow까지 함께 되돌린다
+  function picState(el) {
+    const chain = [];
+    for (let e = el; e && !e.classList.contains('dk-page-inner'); e = e.parentElement) chain.push([e, e.getAttribute('style')]);
+    return {el, chain, src: el.getAttribute('src')};
+  }
+  const setAttr = (e, name, v) => (v === null || v === undefined ? e.removeAttribute(name) : e.setAttribute(name, v));
+  function recordPic(before) {
+    picUndo.push(before);
+    if (picUndo.length > 50) picUndo.shift();
+    picRedo.length = 0;
+    textAfterPic = false;
+    touch(before.el);
+  }
+  function flipPic(from, to) {
+    const was = from.pop();
+    to.push(picState(was.el));
+    was.chain.forEach(([e, v]) => setAttr(e, 'style', v));
+    if (was.el.matches('img')) setAttr(was.el, 'src', was.src);
+    textAfterPic = false;
+    const i = pages.indexOf(pageOf(was.el));
+    if (i !== index) go(i); // 다른 쪽의 그림이면 무엇이 되돌아갔는지 보이게 그 쪽으로 간다
+    hideBars();
+    touch(was.el);
+  }
+  // 이 파일을 연 때의 그림으로 돌아갈 수 있는지
+  const canRestore = (pic) => pic.matches('img') && originals.has(pic.dataset.dkImg) && originals.get(pic.dataset.dkImg) !== pic.getAttribute('src');
   function startDrag(el, e) {
-    const page = el.closest('.dk-page');
+    const page = pageOf(el);
     const r = el.getBoundingClientRect();
     const box = page.getBoundingClientRect();
     const [ox, oy] = offsetOf(el);
@@ -675,6 +739,7 @@
     if (!drag.moved && Math.abs(dx) + Math.abs(dy) < 4) return;
     if (!drag.moved) {
       drag.moved = true;
+      drag.before = picState(drag.el);
       imgBar.hidden = true;
       // 그림을 자르는 상위 틀이 있으면 옮긴 그림이 잘리므로 풀어 준다
       for (let p = drag.el.parentElement; p && !p.classList.contains('dk-page-inner'); p = p.parentElement) {
@@ -693,7 +758,7 @@
     drag = null;
     if (d.moved) {
       suppressClick = true;
-      touch(d.el);
+      recordPic(d.before);
     }
   });
   document.addEventListener('click', (e) => {
@@ -710,15 +775,24 @@
     }
     pickedImage = pic;
     $('[data-a=swap]', imgBar).hidden = !pic.matches('img');
+    $('[data-a=orig]', imgBar).hidden = !canRestore(pic);
     placeBar(imgBar, pic.getBoundingClientRect());
   });
   const imgInput = $('input', imgBar);
   imgBar.addEventListener('click', (e) => {
     const act = e.target.dataset && e.target.dataset.a;
     if (act === 'swap') imgInput.click();
-    if (act === 'home' && pickedImage) {
+    if (act === 'home' && pickedImage && pickedImage.style.translate) {
+      const before = picState(pickedImage);
       pickedImage.style.translate = '';
-      touch(pickedImage);
+      recordPic(before);
+      placeBar(imgBar, pickedImage.getBoundingClientRect());
+    }
+    if (act === 'orig' && pickedImage && canRestore(pickedImage)) {
+      const before = picState(pickedImage);
+      setAttr(pickedImage, 'src', originals.get(pickedImage.dataset.dkImg));
+      recordPic(before);
+      e.target.hidden = true;
       placeBar(imgBar, pickedImage.getBoundingClientRect());
     }
   });
@@ -732,8 +806,9 @@
       // 먼저 읽어 보고 브라우저가 그릴 수 있는 그림일 때만 바꾼다
       const test = new Image();
       test.onload = () => {
+        const before = picState(target);
         target.src = reader.result;
-        touch(target);
+        recordPic(before);
       };
       test.onerror = () => {
         status.textContent = '이 그림 파일은 열 수 없습니다';
@@ -743,6 +818,36 @@
     };
     reader.readAsDataURL(file);
     imgBar.hidden = true;
+  });
+
+  // ── 문서 안 링크 ──
+  // 쪽을 나눠 보여 주므로 #이름 링크는 브라우저가 스스로 찾아가지 못한다. 대상과 그 쪽을 찾는다
+  function findAnchor(raw, preferPage) {
+    let name = raw;
+    try {
+      name = decodeURIComponent(raw);
+    } catch (e) {}
+    const num = /^\d+$/.test(name) ? Number(name) - 1 : -1;
+    if (preferPage && pages[num]) return {i: num, el: null}; // 뷰어가 쓰는 #쪽번호
+    const byId = name ? document.getElementById(name) : null;
+    const el = byId && doc.contains(byId) ? byId : $$('a[name]', doc).find((a) => a.getAttribute('name') === name);
+    const page = el && pageOf(el);
+    if (page) return {i: pages.indexOf(page), el};
+    return pages[num] ? {i: num, el: null} : null;
+  }
+  // 고정 크기 쪽은 쪽 전체가 보이므로 쪽 안을 밀지 않는다(밀면 쪽 모양이 어긋난다)
+  const scrollToAnchor = (hit) => {
+    if (hit && hit.el && !pageHeight(pages[hit.i])) hit.el.scrollIntoView({block: 'start'});
+  };
+  document.addEventListener('click', (e) => {
+    if (editing && !e.metaKey && !e.ctrlKey) return; // 편집 중에는 눌러서 글자를 고친다
+    const a = e.target.closest && e.target.closest('a[href^="#"],area[href^="#"]');
+    if (!a || !doc.contains(a)) return;
+    const hit = findAnchor(a.getAttribute('href').slice(1), false);
+    if (!hit) return;
+    e.preventDefault();
+    go(hit.i);
+    scrollToAnchor(hit);
   });
 
   // ── 연속 읽기 ──
@@ -785,7 +890,27 @@
     $$('[class=""]', top).forEach((e) => e.removeAttribute('class'));
     return top;
   }
+  // 입력칸에 채운 값은 속성이 아니라 브라우저 상태에만 있어 복제·저장에서 빠진다. 복제하기 전에 속성으로 옮긴다
+  function syncForms() {
+    $$('input', doc).forEach((e) => {
+      if (e.type === 'checkbox' || e.type === 'radio') e.toggleAttribute('checked', e.checked);
+      // 비밀번호는 파일에 글자 그대로 남기지 않는다
+      else if (e.type !== 'password' && e.type !== 'file' && e.value !== (e.getAttribute('value') || '')) e.setAttribute('value', e.value);
+    });
+    $$('textarea', doc).forEach((e) => {
+      if (e.value !== e.defaultValue) e.defaultValue = e.value;
+    });
+    $$('select', doc).forEach((s) => {
+      const opts = [...s.options];
+      // 고른 적 없이 첫 항목이 기본으로 보이는 칸은 표시를 더하지 않는다
+      if (!s.multiple && s.selectedIndex === 0 && !opts.some((o) => o.defaultSelected)) return;
+      opts.forEach((o) => {
+        if (o.selected !== o.defaultSelected) o.defaultSelected = o.selected;
+      });
+    });
+  }
   function cleanHtml() {
+    syncForms();
     const copy = stripEditor(root.cloneNode(true));
     $$('.dk-ui', copy).forEach((e) => e.remove());
     $$('.dk-page', copy).forEach((e) => {
@@ -829,6 +954,27 @@
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
+  const stampOf = async (handle) => {
+    try {
+      return (await handle.getFile()).lastModified;
+    } catch (e) {
+      return 0;
+    }
+  };
+  // 고른 파일이 이 탭이 모르는 사이 바뀌었는지 본다(열어 둔 탭의 저장이 다른 도구의 수정을 지우지 않게)
+  async function changedOutside(handle) {
+    try {
+      const file = await handle.getFile();
+      if (handle === fileHandle) return !!fileStamp && file.lastModified !== fileStamp;
+      // 처음 고른 파일은 비교할 시각이 없으니, 같은 문서의 더 새 판인지 판 번호로 본다
+      const head = await file.slice(0, 4096).text();
+      const id = /data-doc-id="([^"]*)"/.exec(head);
+      const rev = /data-doc-rev="(\d+)"/.exec(head);
+      return !!id && !!rev && id[1] === docId && Number(rev[1]) > Number(docRev);
+    } catch (e) {
+      return false; // 파일이 없어졌거나 읽을 수 없으면 쓰기 단계에서 처리한다
+    }
+  }
   async function save() {
     if (saving || modalOpen) return;
     saving = true;
@@ -837,15 +983,25 @@
       const html = cleanHtml();
       if (window.showSaveFilePicker) {
         try {
-          if (!fileHandle) fileHandle = await showSaveFilePicker({suggestedName: FILE_NAME, types: [{description: 'HTML 파일', accept: {'text/html': ['.html']}}]});
-          const w = await fileHandle.createWritable();
+          const pick = () => showSaveFilePicker({suggestedName: FILE_NAME, types: [{description: 'HTML 파일', accept: {'text/html': ['.html']}}]});
+          let handle = fileHandle || (await pick());
+          if (await changedOutside(handle)) {
+            const act = await askModal('파일이 밖에서 바뀌었습니다. 덮어쓰면 그 변경이 사라집니다.', [['saveas', '다른 이름으로 저장'], ['overwrite', '덮어쓰기'], ['cancel', '취소']]);
+            if (act === 'cancel') return;
+            if (act === 'saveas') handle = await pick();
+          }
+          const w = await handle.createWritable();
           await w.write(html);
           await w.close();
+          fileHandle = handle;
+          // 이미 파일에 썼으므로 시각을 못 읽어도 저장은 성공이다(다음 비교만 건너뛴다)
+          fileStamp = await stampOf(handle);
           afterSave(rev, true);
           return;
         } catch (e) {
           if (e.name === 'AbortError') return;
           fileHandle = null; // 권한이 막히면 내려받기로 넘어간다
+          fileStamp = 0;
         }
       }
       // 내려받기는 사용자가 취소해도 알 수 없으므로 임시 저장을 지우지 않는다
@@ -874,6 +1030,7 @@
   function saveDraft() {
     if (!dirty) return;
     try {
+      syncForms();
       const saved = {};
       let bigImage = false;
       touched.forEach((i) => {
@@ -894,6 +1051,31 @@
     }
     showStatus();
   }
+  // 뒤쪽을 막고 단추 하나를 고르게 한다. 고른 단추의 이름을 돌려준다
+  function askModal(message, buttons) {
+    return new Promise((resolve) => {
+      const modal = document.createElement('div');
+      modal.className = 'dk-ui dk-modal';
+      modal.innerHTML = `<div class="dk-banner" role="alertdialog" aria-modal="true"><span>${message}</span>${buttons.map(([a, t]) => `<button data-a="${a}">${t}</button>`).join('')}</div>`;
+      const blocked = [$('#dk-workspace'), bar];
+      blocked.forEach((e) => {
+        e.inert = true;
+      });
+      modalOpen = true;
+      modal.addEventListener('click', (e) => {
+        const act = e.target.dataset.a;
+        if (!act) return;
+        modal.remove();
+        modalOpen = false;
+        blocked.forEach((b) => {
+          b.inert = false;
+        });
+        resolve(act);
+      });
+      document.body.append(modal);
+      $('button', modal).focus();
+    });
+  }
   // 먼저 고르게 한다. 고르지 않고 고치거나 저장하면 옛 임시 저장과 섞여 글이 사라질 수 있다
   function offerDraft() {
     let draft = null;
@@ -903,22 +1085,8 @@
     if (!draft || !draft.pages) return;
     const when = new Date(draft.time);
     const pad = (n) => String(n).padStart(2, '0');
-    const modal = document.createElement('div');
-    modal.className = 'dk-ui dk-modal';
-    modal.innerHTML = `<div class="dk-banner" role="alertdialog" aria-modal="true"><span>저장하지 않은 편집이 있습니다(${when.getMonth() + 1}/${when.getDate()} ${pad(when.getHours())}:${pad(when.getMinutes())}).${draft.bigImage ? ' 바꾼 그림은 크기가 커서 함께 남기지 못했습니다. 불러온 뒤 다시 넣어 주세요.' : ''}</span><button data-a="load">불러오기</button><button data-a="drop">버리기</button></div>`;
-    const blocked = [$('#dk-workspace'), bar];
-    blocked.forEach((e) => {
-      e.inert = true;
-    });
-    modalOpen = true;
-    modal.addEventListener('click', (e) => {
-      const act = e.target.dataset.a;
-      if (!act) return;
-      modal.remove();
-      modalOpen = false;
-      blocked.forEach((b) => {
-        b.inert = false;
-      });
+    const message = `저장하지 않은 편집이 있습니다(${when.getMonth() + 1}/${when.getDate()} ${pad(when.getHours())}:${pad(when.getMinutes())}).${draft.bigImage ? ' 바꾼 그림은 크기가 커서 함께 남기지 못했습니다. 불러온 뒤 다시 넣어 주세요.' : ''}`;
+    askModal(message, [['load', '불러오기'], ['drop', '버리기']]).then((act) => {
       if (act === 'drop') {
         try {
           localStorage.removeItem(DRAFT_KEY);
@@ -943,8 +1111,6 @@
       revision++;
       go(index);
     });
-    document.body.append(modal);
-    $('button', modal).focus();
   }
 
   // ── 시작 ──
@@ -955,7 +1121,9 @@
     if (c.visibility !== 'visible') s.style.setProperty('visibility', 'visible', 'important');
     if (c.opacity === '0') s.style.setProperty('opacity', '1', 'important');
   });
-  showPage(Number(location.hash.slice(1) || 1) - 1);
+  const firstHash = location.hash.slice(1);
+  const firstHit = firstHash ? findAnchor(firstHash, true) : null;
+  showPage(firstHit ? firstHit.i : Number(firstHash || 1) - 1);
   pages.forEach((p) => markHosts(innerOf(p)));
   [noteKey, noteText].forEach((n) => {
     n.dataset.dkHost = '';
@@ -967,27 +1135,43 @@
   resize();
   setEditing(true);
   setInterval(timer, 250);
+  // 그림과 글꼴을 기다리되 상한을 둔다. 응답 없는 서버나 지연 로딩 그림 때문에 뷰어가 준비되지 못하는 일이 없게 한다
   const ready = () =>
-    Promise.all($$('img', doc).map((i) => (i.complete ? null : new Promise((r) => {
-      i.addEventListener('load', r, {once: true});
-      i.addEventListener('error', r, {once: true});
-    })))).then(() => document.fonts.ready);
+    Promise.race([
+      Promise.all($$('img', doc).map((i) => (i.complete ? null : new Promise((r) => {
+        i.addEventListener('load', r, {once: true});
+        i.addEventListener('error', r, {once: true});
+      })))).then(() => document.fonts.ready),
+      new Promise((r) => setTimeout(r, IMAGE_WAIT)),
+    ]);
+  function measureBase() {
+    const was = index;
+    base = atFullScale(() =>
+      pages.map((s, i) => {
+        pages.forEach((o, j) => o.classList.toggle('dk-active', j === i));
+        return measurePage(s);
+      }),
+    );
+    pages.forEach((o, j) => o.classList.toggle('dk-active', j === was));
+  }
   ready().then(() => {
     resize();
     // 기준값은 처음 문서에서 한 번만 재고 파일에 함께 저장한다(넘친 채 저장해도 경고가 살아 있게)
-    const stored = $('#dk-base').textContent.trim();
-    if (stored) base = JSON.parse(stored);
+    const kept = $('#dk-base').textContent.trim();
+    if (kept) base = JSON.parse(kept);
     else {
-      const was = index;
-      base = atFullScale(() =>
-        pages.map((s, i) => {
-          pages.forEach((o, j) => o.classList.toggle('dk-active', j === i));
-          return measurePage(s);
-        }),
-      );
-      pages.forEach((o, j) => o.classList.toggle('dk-active', j === was));
+      measureBase();
+      // 상한을 넘겨 늦게 도착한 그림·글꼴은 자리를 밀어내므로, 아직 고치지 않았으면 기준값을 다시 잰다
+      const remeasure = () => {
+        if (revision) return;
+        measureBase();
+        checkOverflow();
+      };
+      $$('img', doc).filter((i) => !i.complete).forEach((i) => i.addEventListener('load', remeasure, {once: true}));
+      if (document.fonts.status !== 'loaded') document.fonts.ready.then(remeasure);
     }
     checkOverflow();
+    scrollToAnchor(firstHit);
     offerDraft();
     document.documentElement.dataset.dkReady = '1';
   });

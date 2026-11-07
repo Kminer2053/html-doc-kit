@@ -149,7 +149,7 @@ const VISIBLE = `(()=>{
     const q=p.getBoundingClientRect();const vr=view.getBoundingClientRect();
     const w=document.createTreeWalker(p,NodeFilter.SHOW_TEXT);let all=0,seen=0,sampled=0,covered=0,probes=0,below=false;
     for(let n=w.nextNode();n;n=w.nextNode()){
-      const t=n.nodeValue.trim();if(!t||n.parentElement.closest('style,script,svg'))continue;
+      const t=n.nodeValue.trim();if(!t||n.parentElement.closest('style,script,svg,select,textarea,datalist'))continue;
       all+=t.length;
       const e=n.parentElement;const c=getComputedStyle(e);
       if(c.visibility!=='visible')continue;

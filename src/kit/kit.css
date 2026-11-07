@@ -3,11 +3,13 @@
 .dk-page[data-dk-fixed]{height:var(--dk-h);overflow:hidden}
 .dk-page-inner{position:relative;box-sizing:border-box;width:100%;min-height:100%;height:auto}
 .dk-page[data-dk-fixed] .dk-page-inner{height:100%}
+/* 높이가 내용만큼인 쪽에서 폭을 넘는 표·그림은 잘리지 않고 가로로 스크롤해 본다. 세로는 쪽과 함께 늘어난다 */
+.dk-page:not([data-dk-fixed]) .dk-page-inner{overflow-x:auto;overflow-y:hidden}
 .dk-measuring .dk-page{zoom:1!important}
 .dk-source-page{top:auto;left:auto}
 body.dk-js{margin:0;height:100vh;overflow:hidden;background:#24384c}
-body.dk-js .dk-page:not(.dk-active){display:none}
-body.dk-js.dk-reading .dk-page:not(.dk-active){display:block}
+body.dk-js #dk-document>.dk-page:not(.dk-active){display:none}
+body.dk-js.dk-reading #dk-document>.dk-page:not(.dk-active){display:block}
 body.dk-js .dk-page{margin:0 auto;box-shadow:0 2px 20px #0005}
 body.dk-js.dk-reading .dk-page{margin:0 auto 30px}
 #dk-workspace{display:block}
@@ -52,6 +54,9 @@ body.dk-editing [data-dk-empty=inline]{display:inline-block;vertical-align:top}
 @media(max-width:1024px){.dk-controls{font-size:11px;gap:5px;padding:6px}.dk-ui button{padding:6px}.dk-speaker{width:305px;font-size:14px}}
 @media print{
   .dk-ui{display:none!important}
+  /* 인쇄 창의 '배경 그래픽'이 꺼져 있어도 표지·색 상자·표 머리 배경을 그대로 찍는다 */
+  .dk-page,.dk-page *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .dk-page:not([data-dk-fixed]) .dk-page-inner{overflow:visible}
   html,body,body.dk-js{height:auto;overflow:visible;background:#fff}
   body.dk-js #dk-workspace{position:static;display:block;padding:0}
   body.dk-js #dk-viewport{overflow:visible}
