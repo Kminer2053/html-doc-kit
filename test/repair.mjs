@@ -797,6 +797,29 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     ok('R2 중단된 턴이 끝난 뒤 턴 밖에서 저장한 파일은 고치지 않음', !hasKit(user), out);
   }
 
+  // P4: 중단된 턴의 마지막 도구 사용 뒤에 바뀐 작업 폴더 HTML은 고치지 않고 확인 필요로 알린다
+  {
+    const s = session();
+    s.prompt();
+    s.bash('ls');
+    pause(2000);
+    const late = s.put('late.html');
+    pause(1600);
+    s.prompt();
+    const out = s.stop();
+    ok('P4 중단된 턴의 마지막 도구 사용 뒤 파일은 그대로 두고 확인 필요로 알림', !hasKit(late) && out.includes(`확인 필요: ${late}`), out);
+    s.prompt();
+    const o2 = s.stop();
+    ok('P4 확인 필요 알림은 한 번만', !o2.includes('late.html'), o2);
+    const c = session();
+    c.prompt();
+    c.bash('ls');
+    pause(2000);
+    const done = c.put('late.html');
+    c.stop();
+    ok('P4 중단되지 않은 턴이면 마지막 도구 사용 뒤 파일도 고침', hasKit(done));
+  }
+
   // 4·26: 템플릿 판정을 좁히고, 그래도 건너뛰면 알린다
   {
     const s = session();
@@ -919,6 +942,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const o2 = s2.stop();
     ok('R3 스크립트 실행만으로는 바탕화면·다운로드의 파일을 고치지 않음', !hasKit(py) && !hasKit(dl));
     ok('N3 스크립트를 돌린 턴에 바탕화면·다운로드에 생긴 HTML은 확인 필요로 알림', o2.includes(`확인 필요: ${py}`) && o2.includes(`확인 필요: ${dl}`) && o2.includes('사용자 폴더라 그대로'), o2);
+    // P1: 명령에 폴더 이름이 나와도 바탕화면·다운로드·문서 폴더를 훑어서 고치지 않는다. 직접 쓴 경로만 고친다
     const s2b = session();
     s2b.prompt();
     const py2 = path.join(desk, 'gen2.html');
@@ -926,18 +950,45 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     fs.writeFileSync(py2, body);
     const dl2 = path.join(hhome, 'Downloads', 'dl2.html');
     fs.writeFileSync(dl2, body);
-    const deep = path.join(desk, 'deep', 'x.html');
-    fs.mkdirSync(path.dirname(deep), {recursive: true});
-    fs.writeFileSync(deep, body);
-    s2b.stop();
-    ok('R3 명령에 ~/Desktop이 나오면 바탕화면만 얕게 훑음', hasKit(py2) && !hasKit(dl2) && !hasKit(deep));
+    const ob = s2b.stop();
+    ok('P1 명령에 ~/Desktop이 나와도 바탕화면 파일은 고치지 않고 확인 필요로 알림', !hasKit(py2) && !hasKit(dl2) && ob.includes(`확인 필요: ${py2}`), ob);
     const s2c = session();
     s2c.prompt();
     const dl3 = path.join(hhome, 'Downloads', 'dl3.html');
     s2c.bash('node make.mjs > "$HOME/Downloads/out.log"');
     fs.writeFileSync(dl3, body);
     s2c.stop();
-    ok('R3 $HOME/Downloads 경로가 나오면 다운로드를 얕게 훑음', hasKit(dl3));
+    ok('P1 $HOME/Downloads 경로가 나와도 다운로드의 다른 HTML은 고치지 않음', !hasKit(dl3));
+    const s2d = session();
+    s2d.prompt();
+    const direct = path.join(desk, 'direct.html');
+    const direct2 = path.join(hhome, 'Downloads', 'direct2.html');
+    fs.writeFileSync(direct, body);
+    fs.writeFileSync(direct2, body);
+    s2d.bash('python3 gen.py -o ~/Desktop/direct.html && node make.mjs > "$HOME/Downloads/direct2.html"');
+    s2d.stop();
+    ok('P1 사용자 폴더도 -o·리디렉션으로 직접 쓴 파일은 고침', hasKit(direct) && hasKit(direct2));
+    // P1: 읽기만 하는 명령(ls)에 폴더 이름이 나오고, 그 사이 받은 파일
+    const s2e = session();
+    s2e.prompt();
+    s2e.bash(`ls ${path.join(hhome, 'Downloads')}`);
+    const inv = path.join(hhome, 'Downloads', 'invoice.html');
+    fs.writeFileSync(inv, body);
+    const oe = s2e.stop();
+    ok('P1 ls ~/Downloads 뒤에 받은 파일은 고치지 않음', !hasKit(inv) && fs.readFileSync(inv, 'utf-8') === body, oe);
+    // P1b: 커밋 메시지에 Documents가 나와도 문서 폴더의 기존 파일은 고치지 않고 알림
+    const s2f = session();
+    const docs = path.join(hhome, 'Documents');
+    fs.mkdirSync(docs, {recursive: true});
+    const mine = path.join(docs, 'old.html');
+    fs.writeFileSync(mine, body);
+    fs.utimesSync(mine, oldTime, oldTime);
+    s2f.prompt();
+    fs.appendFileSync(mine, '<p>사용자 추가</p>');
+    const mineText = fs.readFileSync(mine, 'utf-8');
+    s2f.bash('git commit -m "Update Documents section"');
+    const of = s2f.stop();
+    ok('P1b 커밋 메시지에 Documents가 나와도 문서 폴더 파일은 그대로 두고 확인 필요로 알림', fs.readFileSync(mine, 'utf-8') === mineText && of.includes(`확인 필요: ${mine}`), of);
 
     const s3 = session();
     s3.prompt();
@@ -1211,6 +1262,43 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       const out = a.stop();
       const copy = path.join(a.dir, 'index_편집용.html');
       ok(`R8 ${marker}의 웹 프레임워크(${name})면 원본은 두고 사본을 만들어 알림`, before.equals(fs.readFileSync(f)) && hasKit(copy) && out.includes('index_편집용.html') && out.includes(name), out);
+    }
+    // P2: 의존성 선언 자리에서만 이름을 찾는다. 설명·주석·흔한 낱말, HTTP 클라이언트 aiohttp는 신호가 아니다
+    for (const [marker, text] of [
+      ['pyproject.toml', '[project]\nname="analysis"\ndependencies=["numpy","pandas","aiohttp"]\n'],
+      ['pyproject.toml', '[project]\nname="x"\ndescription = "flask 없이 쓰는 django 비교 분석"\ndependencies = ["numpy"]\n# fastapi는 나중에\n'],
+      ['Cargo.toml', '[package]\nname="verse"\ndescription = "Generate a poem from data"\n[dependencies]\nserde="1"\n'],
+      ['Cargo.toml', '[package]\nname="x"\n[dev-dependencies]\nwarp = "0.3"\n'],
+      ['requirements.txt', '# flask 앱은 따로 있음\nnumpy\nrequests  # django와 무관\n'],
+      ['Gemfile', "source 'https://rubygems.org'\n# rails 없이 쓰는 스크립트\ngem 'nokogiri'\n"],
+      ['go.mod', 'module example.com/tide-report\n\ngo 1.22\n// gin-gonic은 쓰지 않음\nrequire github.com/spf13/cobra v1.8.0\n'],
+      ['composer.json', JSON.stringify({description: 'laravel 비교 문서', require: {'league/csv': '9'}})],
+      ['pom.xml', '<project><description>spring-boot 없이</description><artifactId>report</artifactId></project>'],
+      ['mix.exs', '# plug in data\ndefp deps, do: [{:jason, "~> 1.4"}]'],
+    ]) {
+      const a = session();
+      a.put(marker, text);
+      a.prompt();
+      const f = a.write('docs/report.html');
+      const out = a.stop();
+      ok(`P2 ${marker}의 의존성 밖 낱말(${text.slice(0, 40).replace(/\n/g, ' ')}…)은 신호가 아님`, hasKit(f) && !fs.existsSync(path.join(a.dir, 'docs', 'report_편집용.html')), out);
+    }
+    // P2: 선언 자리의 여러 모양은 그대로 맞춘다
+    for (const [marker, text, name] of [
+      ['pyproject.toml', '[project]\nname="x"\ndependencies = [\n  "numpy",\n  "FastAPI[all]>=0.1",\n]\n', 'FastAPI'],
+      ['pyproject.toml', '[tool.poetry.dependencies]\npython = "^3.11"\nflask = "^3"\n', 'flask'],
+      ['Cargo.toml', '[package]\nname="x"\n[dependencies.poem]\nversion = "3"\n', 'poem'],
+      ['go.mod', 'module x\n\nrequire (\n\tgithub.com/labstack/echo/v4 v4.11.0\n)\n', 'labstack/echo'],
+      ['composer.json', JSON.stringify({require: {php: '^8.2', 'laravel/framework': '^11'}}), 'laravel/framework'],
+      ['build.gradle', "plugins { id 'org.springframework.boot' version '3.2.0' }\n", 'org.springframework.boot'],
+      ['setup.py', "setup(name='x', install_requires=['numpy', 'bottle>=0.12'])\n", 'bottle'],
+    ]) {
+      const a = session();
+      a.put(marker, text);
+      a.prompt();
+      const f = a.write('index.html');
+      const out = a.stop();
+      ok(`P2 ${marker}의 의존성 선언(${name})은 웹 프레임워크로 봄`, !hasKit(f) && hasKit(path.join(a.dir, 'index_편집용.html')) && out.includes(name), out);
     }
     // N1: 서버 웹 프레임워크 프로젝트에서 앱 폴더 안은 빼고, 스크립트가 앱 폴더 밖에 만든 HTML은 사본을 만든다
     {
