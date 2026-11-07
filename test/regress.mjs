@@ -85,7 +85,9 @@ const state = (expr) => b.ev(`dkKit.state().${expr}`);
 const selectAll = () => b.key('a', 'KeyA', 65, 4);
 const esc = () => b.key('Escape', 'Escape', 27);
 const keyN = () => b.key('ㅜ', 'KeyN', 78, 0, 'ㅜ');
-const settle = () => b.ev('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+const settle = () => b.settle();
+// 임시 저장(0.8초 뒤)에 글이 들어갈 때까지 최대 5초 기다린다. 고정 대기는 느린 기계에서 간헐 실패한다
+const draftHas = (...txts) => b.until(`(()=>{const d=localStorage.getItem(${DRAFT})||'';return ${JSON.stringify(txts)}.every(t=>d.includes(t))})()`);
 const ready = async () => {
   for (let i = 0; i < 100 && !(await b.ev(`document.documentElement.dataset.dkReady==='1'`)); i++) await sleep(50);
 };
@@ -198,7 +200,7 @@ await scenario('1차-1·12·44 안내를 고르기 전 저장·고치기 막힘'
   await caretEnd(`document.querySelector('#dk-note-text')`);
   await b.type(' 메모고침A');
   await esc();
-  await sleep(1000);
+  await draftHas('본문고침A', '메모고침A');
   const before = await draftSig();
   check('1차-1 준비: 본문·메모 고침이 임시 저장됨', before !== null && before.includes('본문고침A') && before.includes('메모고침A'));
   await reload();
@@ -277,6 +279,24 @@ await scenario('1차-6·22·38 메모를 열거나 창을 줄여도 거짓 경�
   await bad('메모를 닫고 15쪽 모두');
 });
 
+// R12: 화면 그리기(requestAnimationFrame)가 멈춰도 시험 도우미가 60초씩 멈추지 않는다
+await scenario('시험 도우미: 화면 그리기가 멈춰도 settle이 넘어감', '#11', async () => {
+  check('R12 Chrome을 배경 멈춤 없이 띄움', ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'].every((f) => b.args.includes(f)), b.args.join(' '));
+  await b.ev(`window.__raf0=window.requestAnimationFrame;window.requestAnimationFrame=()=>0;1`);
+  const t0 = Date.now();
+  let ok = false;
+  try {
+    ok = (await b.settle()) === true;
+  } finally {
+    await b.ev(`window.requestAnimationFrame=window.__raf0;1`);
+  }
+  const took = Date.now() - t0;
+  check('R12 rAF가 멈춰도 settle이 1초 안에 끝남', ok && took < 1000, `${took}ms`);
+  const t1 = Date.now();
+  await settle();
+  check('R12 평소 settle도 빨리 끝남', Date.now() - t1 < 1000, `${Date.now() - t1}ms`);
+});
+
 await scenario('1차-7 ⌘A 덮어쓰기에도 색 표시·화살표 유지', '#11', async () => {
   await pin(findHost('체류 인구'));
   const r = await rectOf(`window.__h`);
@@ -324,7 +344,7 @@ await scenario('1차-11·42·2차-10·25 큰 그림을 넣어도 임시 저장�
   const host = findHost('AI혁신추진단TF');
   await caretEnd(host);
   await b.type('큰그림뒤글');
-  await sleep(1200);
+  await draftHas('큰그림뒤글');
   check('1차-11 큰 그림 뒤에 고친 글도 임시 저장됨', ((await draftText()) || '').includes('큰그림뒤글'));
   await reload();
   const banner = await b.ev(`document.querySelector('.dk-banner')?.innerText||''`);
@@ -364,7 +384,7 @@ await scenario('1차-46 깨진 임시 저장이 이후 임시 저장을 막지 �
   const p = findHost('연간 실적');
   await caretEnd(p);
   await b.type('깨진뒤입력');
-  await sleep(1200);
+  await draftHas('깨진뒤입력');
   let ok = false;
   try {
     ok = JSON.parse(await draftText()).pages != null;
@@ -377,7 +397,7 @@ await scenario('1차-47 파일을 다른 경로에 두어도 같은 문서의 �
   const p = findHost('연간 실적');
   await caretEnd(p);
   await b.type('경로옮김글');
-  await sleep(1100);
+  await draftHas('경로옮김글');
   await b.nav('about:blank');
   await b.nav(MOVED, '#15');
   await ready();
@@ -570,7 +590,7 @@ await scenario('1차-36 저장 위치 오류는 내려받기로 넘어가되 임
   const p = findHost('연간 실적');
   await caretEnd(p);
   await b.type('오류시험');
-  await sleep(1000);
+  await draftHas('오류시험');
   await b.send('Browser.setDownloadBehavior', {behavior: 'deny'});
   await mockPicker({fail: 'NotAllowedError'});
   await clickSave();
@@ -583,7 +603,7 @@ await scenario('1차-36 저장을 취소하면 저장됨으로 치지 않음', '
   const p = findHost('연간 실적');
   await caretEnd(p);
   await b.type('취소시험');
-  await sleep(1000);
+  await draftHas('취소시험');
   await mockPicker({fail: 'AbortError'});
   await clickSave();
   await sleep(400);

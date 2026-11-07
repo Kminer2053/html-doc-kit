@@ -11,15 +11,32 @@ import {ensure, inputOf} from './ops.mjs';
 
 const HOME = () => process.env.DOC_KIT_HOME || os.homedir();
 const stateDir = () => path.join(HOME(), '.doc-kit', 'state');
-// 앱 신호로 치는 폴더. 프로젝트 안에서만 본다. out, target, vendor는 문서가 있을 수 있어 신호가 아니다
-const APP_DIRS = new Set(['node_modules', 'bower_components', 'src', 'public', 'dist', 'build', 'static', 'views', 'templates', 'partials', 'emails', '_build', '_site', 'site', 'coverage', 'htmlcov', 'lcov-report', 'test-results', 'playwright-report', 'storybook-static', 'venv', '__pycache__', '.next', '.nuxt', '.svelte-kit', '.venv', '.git', '.doc-kit']);
-// 스캔이 내려가지 않는 폴더. 앱 폴더와 함께 점 폴더, 다른 앱의 자료 폴더를 뺀다
-const SCAN_SKIP = new Set([...APP_DIRS, 'Library', 'AppData', 'Applications']);
+// 늘 건드리지 않는 폴더: 받아 온 의존성, 가상 환경, 도구가 만든 시험 리포트. 프로젝트 안에서만 본다
+const SYSTEM_DIRS = new Set(['node_modules', 'bower_components', 'venv', '__pycache__', '.next', '.nuxt', '.svelte-kit', '.venv', '.git', '.doc-kit', 'coverage', 'htmlcov', 'lcov-report', 'test-results', 'playwright-report', 'storybook-static']);
+// 코드 프로젝트일 때만 앱 폴더로 치는 이름. 프로젝트 신호가 없는 평범한 폴더에서는 문서 폴더로 본다.
+// out, target, vendor는 문서가 있을 수 있어 넣지 않는다
+const APP_DIRS = new Set(['src', 'public', 'dist', 'build', 'static', 'views', 'templates', 'partials', 'emails', 'layouts', '_build', '_site', 'site']);
+// 스캔이 내려가지 않는 폴더. 점 폴더, 다른 앱의 자료 폴더도 뺀다. 앱 폴더 이름은 내려가서 찾고 제외할 때 알린다
+const SCAN_SKIP = new Set([...SYSTEM_DIRS, 'Library', 'AppData', 'Applications']);
 const WEB_DEPS = new Set(['react', 'vue', 'svelte', 'next', 'nuxt', 'vite', 'webpack', 'astro', 'gatsby', 'parcel', 'solid-js', 'remix', 'electron', 'express', 'koa', 'fastify', 'hono', 'preact', 'lit', 'tailwindcss', 'ember-source', 'vuepress', 'vitepress', 'hexo', 'nest', 'polka', 'restify', 'hapi']);
 const WEB_DEP_SCOPES = /^@(angular|sveltejs|11ty|remix-run|nestjs|docusaurus|hono|hapi|nuxt|tanstack)\//;
-const BUILD_CONFIG = /^(?:(?:vite|vitest|next|nuxt|astro|webpack|svelte|remix|rollup|parcel|gatsby|tailwind|eleventy|quasar|vue|docusaurus|rspack|rsbuild)\.config\.[cm]?[jt]sx?|\.eleventy\.[cm]?js|angular\.json|manage\.py|Gemfile|mkdocs\.ya?ml|_config\.ya?ml|hugo\.(?:toml|ya?ml|json)|artisan|vercel\.json|netlify\.toml|firebase\.json)$/;
-// 문서도 함께 있을 수 있는 애매한 신호: 건너뛰지도 제자리에서 입히지도 않고 사본을 만든다
-const MAYBE_APP = /^(?:go\.mod|pyproject\.toml|setup\.py|requirements\.txt|composer\.json|conf\.py|Cargo\.toml|pom\.xml|build\.gradle(?:\.kts)?|mix\.exs)$/;
+const BUILD_CONFIG = /^(?:(?:vite|vitest|next|nuxt|astro|webpack|svelte|remix|rollup|parcel|gatsby|tailwind|eleventy|quasar|vue|docusaurus|rspack|rsbuild)\.config\.[cm]?[jt]sx?|\.eleventy\.[cm]?js|angular\.json|manage\.py|mkdocs\.ya?ml|_config\.ya?ml|hugo\.(?:toml|ya?ml|json)|artisan|vercel\.json|netlify\.toml|firebase\.json)$/;
+// 언어 프로젝트 파일. 이것만으로는 앱이 아니다. 안에 서버 웹 프레임워크 이름이 있으면 앱 폴더(templates/ 등) 안은 빼고,
+// 그 밖의 HTML은 덮어쓰지 않고 _편집용 사본을 만든다. 없으면 코드 프로젝트로만 쳐서 앱 폴더 안의 HTML만 뺀다.
+// 템플릿 엔진·문서 생성기·노트북(jinja2, tornado, sphinx, markupsafe, jupyter, jekyll 등)은 데이터·문서 저장소에도 흔해 신호로 보지 않는다
+const LANG_FILES = [
+  [/^(?:requirements[\w.-]*\.txt|pyproject\.toml|setup\.py|setup\.cfg|Pipfile)$/, ['flask', 'django', 'fastapi', 'starlette', 'bottle', 'pyramid', 'sanic', 'aiohttp', 'quart', 'falcon', 'cherrypy', 'litestar']],
+  [/^Gemfile$/, ['rails', 'sinatra', 'hanami', 'roda', 'padrino']],
+  [/^go\.mod$/, ['gin-gonic', 'labstack/echo', 'gofiber', 'go-chi', 'gorilla/mux', 'beego', 'revel', 'gobuffalo']],
+  [/^composer\.json$/, ['laravel', 'symfony/framework-bundle', 'symfony/http-kernel', 'slim/slim', 'cakephp', 'yiisoft', 'codeigniter', 'laminas']],
+  [/^Cargo\.toml$/, ['actix-web', 'axum', 'rocket', 'warp', 'tide', 'poem', 'leptos']],
+  [/^(?:pom\.xml|build\.gradle(?:\.kts)?)$/, ['spring-boot', 'spring-webmvc', 'quarkus', 'micronaut', 'jakarta.servlet', 'javax.servlet']],
+  [/^mix\.exs$/, ['phoenix', 'plug']],
+].map(([re, names]) => [re, new RegExp(`(?:^|[^\\w-])(${names.map((n) => n.replace(/[.]/g, '\\.')).join('|')})(?!\\w)`, 'im')]);
+// 바탕화면·다운로드·문서 폴더. 셸 명령에 이 폴더가 직접 나오면 바로 아래를 훑는다.
+// 스크립트만 돌렸으면 고치지 않고 이번 턴에 바뀐 HTML을 알리기만 한다(사용자가 받은 파일이 섞이므로)
+const OUTSIDE_DIRS = ['Desktop', 'Downloads', 'Documents'];
+const OUTSIDE_RE = /(?:^|[^\w.-])(Desktop|Downloads|Documents)(?=$|[/\s'"`;|&)])/g;
 const SCAN_FILES_MAX = 5; // 스캔으로만 찾은 파일이 이보다 많으면 입히지 않고 목록만 알린다
 const SCAN_ENTRIES_MAX = 20000; // 폴더 항목을 이만큼 봤으면 스캔을 멈춘다
 const SKIP_NOTES_MAX = 8; // 제외 알림 줄 수
@@ -153,15 +170,23 @@ function shellCommands(src) {
   return cmds;
 }
 
-const SCRIPT_RUNNER = /^(?:python[\d.]*|node|deno|bun|ruby|perl|php|bash|sh|zsh|npx|uv|npm|pnpm|yarn|make|osascript)$/;
-const SCRIPT_FILE = /\.(?:py|sh|js|mjs|cjs|ts|rb|pl|php)$/;
+// 파일을 쓰지 않는 명령. 이것만 돌린 턴은 스크립트 실행으로 치지 않는다
+const READ_ONLY = new Set(['ls', 'cat', 'head', 'tail', 'less', 'more', 'grep', 'egrep', 'rg', 'find', 'fd', 'wc', 'pwd', 'echo', 'printf', 'which', 'type', 'stat', 'file', 'du', 'df', 'tree', 'diff', 'true', 'false', 'test', '[', 'sleep', 'date', 'whoami', 'uname', 'env', 'printenv']);
+const READ_ONLY_GIT = new Set(['status', 'log', 'diff', 'show', 'branch', 'remote', 'rev-parse', 'ls-files', 'blame', 'describe']);
 const SHELL_WORDS = new Set(['do', 'then', 'else', 'elif', 'if', 'while', 'until', '!', '{', '}', 'sudo', 'command', 'nohup', 'time', 'env', 'exec', 'export']);
 const ASSIGN = /^[A-Za-z_]\w*=/;
+
+// 셸 명령 글자에 나온 바탕화면·다운로드·문서 폴더. .html이 나오면 세 곳 모두.
+// 스크립트 실행만으로는 훑지 않는다(그 턴에 받은 파일까지 고치지 않도록)
+function outsideDirsOf(cmd) {
+  if (/\.html?\b/i.test(cmd)) return new Set(OUTSIDE_DIRS);
+  return new Set([...cmd.matchAll(OUTSIDE_RE)].map((m) => m[1]));
+}
 
 // 셸 명령이 쓴 HTML을 찾는다. 위치를 알 수 없는 쓰기는 unknown으로 돌려준다
 function readShell(cmd, cwd) {
   const home = HOME();
-  const out = {written: new Set(), removed: new Set(), dirs: new Set(), unknown: new Set(), outside: /\.html?\b/i.test(cmd)};
+  const out = {written: new Set(), removed: new Set(), dirs: new Set(), unknown: new Set(), outside: outsideDirsOf(cmd), ran: false};
   const vars = {HOME: home};
   let dir = cwd;
   const expand = (w) => {
@@ -200,7 +225,7 @@ function readShell(cmd, cwd) {
     const a = args.slice(k);
     if (!a.length) continue;
     const prog = path.basename(a[0]);
-    if (SCRIPT_RUNNER.test(prog) || SCRIPT_FILE.test(a[0])) out.outside = true;
+    if (!['cd', 'pushd', 'popd'].includes(prog) && !READ_ONLY.has(prog) && !(prog === 'git' && READ_ONLY_GIT.has(a[1]))) out.ran = true;
     if (prog === 'cd' || prog === 'pushd') {
       const {s, unresolved} = expand(a[1] ?? '~');
       dir = unresolved || s === '-' ? null : abs(s);
@@ -255,7 +280,7 @@ function readShell(cmd, cwd) {
 // 도구 입력에서 HTML 쓰기를 꺼낸다(편집 도구, apply_patch, 셸 명령)
 function effectsOf(i) {
   const cwd = cwdOf(i);
-  const out = {written: new Set(), removed: new Set(), dirs: new Set(), unknown: new Set(), outside: false};
+  const out = {written: new Set(), removed: new Set(), dirs: new Set(), unknown: new Set(), outside: new Set(), ran: false};
   const add = (p) => {
     if (typeof p === 'string' && isHtml(p)) out.written.add(path.resolve(cwd, p.replace(/^~(?=\/)/, HOME())));
   };
@@ -268,14 +293,15 @@ function effectsOf(i) {
       continue;
     }
     const r = readShell(text, cwd);
-    for (const k of ['written', 'removed', 'dirs', 'unknown']) r[k].forEach((v) => out[k].add(v));
-    out.outside ||= r.outside;
+    for (const k of ['written', 'removed', 'dirs', 'unknown', 'outside']) r[k].forEach((v) => out[k].add(v));
+    out.ran ||= r.ran;
   }
   return out;
 }
 export const pathsFromInput = (i) => [...effectsOf(i).written];
 
-function scan(dir, since, found = [], depth = 0, budget = {left: SCAN_ENTRIES_MAX}) {
+// fresh(수정 시각): 훑을 구간에 드는지
+function scan(dir, fresh, found = [], depth = 0, budget = {left: SCAN_ENTRIES_MAX}) {
   if (depth > 6 || found.length > 500 || budget.left <= 0) return found;
   let list;
   try {
@@ -287,21 +313,21 @@ function scan(dir, since, found = [], depth = 0, budget = {left: SCAN_ENTRIES_MA
   for (const e of list) {
     const p = path.join(dir, e.name);
     if (e.isDirectory()) {
-      if (!e.name.startsWith('.') && !SCAN_SKIP.has(e.name)) scan(p, since, found, depth + 1, budget);
+      if (!e.name.startsWith('.') && !SCAN_SKIP.has(e.name)) scan(p, fresh, found, depth + 1, budget);
     } else if (e.isFile() && isHtml(e.name)) {
-      if ((statOf(p)?.mtimeMs ?? 0) >= since) found.push(p);
+      if (fresh(statOf(p)?.mtimeMs ?? 0)) found.push(p);
     }
   }
   return found;
 }
 // 작업 폴더 밖에 저장하기 쉬운 곳은 바로 아래만 본다
-function scanShallow(dir, since) {
+function scanShallow(dir, fresh) {
   try {
     return fs
       .readdirSync(dir, {withFileTypes: true})
       .filter((e) => e.isFile() && isHtml(e.name))
       .map((e) => path.join(dir, e.name))
-      .filter((p) => (statOf(p)?.mtimeMs ?? 0) >= since);
+      .filter((p) => fresh(statOf(p)?.mtimeMs ?? 0));
   } catch {
     return [];
   }
@@ -319,6 +345,19 @@ function gitState(file) {
   if (!r.stdout.trim()) return 'same';
   return r.stdout.startsWith('!!') ? 'ignored' : 'changed';
 }
+// 그 파일을 마지막으로 바꾼 커밋. 해시, 작성 시각·커미터 시각(초), 이 저장소에서 git commit으로 만든 커밋인지.
+// rebase·pull·cherry-pick은 커미터 시각을 지금으로 바꾸거나 남이 만든 커밋을 들여오므로 reflog로 가린다. 모르면 null
+function lastCommit(file) {
+  const dir = path.dirname(path.resolve(file));
+  const r = spawnSync('git', ['-C', dir, 'log', '-1', '--format=%H %at %ct', '--', path.basename(file)], {encoding: 'utf-8', timeout: 5000});
+  const [hash, at, ct] = (r.status === 0 ? r.stdout.trim() : '').split(' ');
+  if (!hash || !(Number(at) > 0) || !(Number(ct) > 0)) return null;
+  const g = spawnSync('git', ['-C', dir, 'reflog', '-n', '500', '--format=%H %gs'], {encoding: 'utf-8', timeout: 5000});
+  const lines = g.status === 0 ? g.stdout.split('\n').filter(Boolean) : [];
+  // reflog가 없으면(꺼 둔 저장소) 시각만으로 본다
+  const local = !lines.length || lines.some((l) => l.startsWith(`${hash} commit`));
+  return {at: Number(at), ct: Number(ct), local};
+}
 
 // 프로젝트 맨 위: 가까운 .git. 없으면 작업 폴더(파일이 그 안에 있을 때), 그것도 아니면 파일의 폴더
 function projectRoot(file, cwd) {
@@ -329,13 +368,33 @@ function projectRoot(file, cwd) {
   }
   return cwd && abs.startsWith(path.resolve(cwd) + path.sep) ? path.resolve(cwd) : path.dirname(abs);
 }
-// 파일에서 프로젝트 맨 위까지 폴더 항목을 본다. 프로젝트 밖의 package.json은 이 문서의 신호가 아니다
+const readHead = (f) => {
+  try {
+    const fd = fs.openSync(f, 'r');
+    const buf = Buffer.alloc(200000);
+    const n = fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    return buf.subarray(0, n).toString('utf-8');
+  } catch {
+    return '';
+  }
+};
+// 파일에서 프로젝트 맨 위까지 폴더 항목을 본다. 프로젝트 밖의 package.json은 이 문서의 신호가 아니다.
+// 앱으로 보는 것: 웹 프레임워크 의존성·빌드 설정, 의존성·시험 리포트 폴더, 코드 프로젝트 안의 앱 폴더(templates/ 등).
+// 언어 프로젝트 파일(requirements.txt, Cargo.toml 등)만 있으면 그 밖의 HTML은 문서다.
+// 그 파일에 서버 웹 프레임워크가 있으면 앱 폴더 밖의 HTML은 web으로 돌려준다(사본 대상)
 function projectSignals(file, cwd) {
   const root = projectRoot(file, cwd);
-  const res = {app: null, maybe: null};
+  const res = {app: null, web: null};
   // 폴더 이름은 프로젝트 안에서만 본다(프로젝트가 ~/src 아래 있어도 문서는 문서다)
-  const hit = path.relative(root, path.resolve(file)).split(path.sep).slice(0, -1).find((s) => APP_DIRS.has(s));
-  if (hit) res.app = `앱·빌드 폴더 ${hit}/`;
+  const segs = path.relative(root, path.resolve(file)).split(path.sep).slice(0, -1);
+  const sys = segs.find((x) => SYSTEM_DIRS.has(x));
+  if (sys) {
+    res.app = `의존성·리포트 폴더 ${sys}/`;
+    return res;
+  }
+  let project = null; // 웹 프레임워크가 없는 코드 프로젝트 파일
+  let web = null; // 언어 프로젝트 파일 속 서버 웹 프레임워크
   for (let d = path.dirname(path.resolve(file)); !res.app; d = path.dirname(d)) {
     let names = [];
     try {
@@ -347,10 +406,26 @@ function projectSignals(file, cwd) {
     if (pj && !res.app) {
       const dep = Object.keys({...pj.dependencies, ...pj.devDependencies, ...pj.peerDependencies}).find((k) => WEB_DEPS.has(k) || WEB_DEP_SCOPES.test(k));
       if (dep) res.app = `웹앱 의존성 ${dep}`;
+      else project ||= 'package.json';
     }
-    res.maybe ||= names.find((n) => MAYBE_APP.test(n)) || null;
+    // Sphinx 설정은 코드 프로젝트로만 친다. 출력 폴더 _build/는 앱 폴더 규칙으로 뺀다
+    if (!res.app && names.includes('conf.py') && /\bsphinx\b|^\s*html_theme\s*=/m.test(readHead(path.join(d, 'conf.py')))) project ||= 'conf.py';
+    for (const n of res.app || web ? [] : names) {
+      const rule = LANG_FILES.find(([re]) => re.test(n));
+      if (!rule) continue;
+      const m = rule[1].exec(readHead(path.join(d, n)));
+      if (m) {
+        web = `웹 프레임워크 ${m[1]}(${n})`;
+        break;
+      }
+      project ||= n;
+    }
     if (d === root || d === path.dirname(d)) break;
   }
+  const hit = !res.app && (web || project) && segs.find((x) => APP_DIRS.has(x));
+  if (hit) res.app = web ? `${web}의 앱 폴더 ${hit}/` : `코드 프로젝트(${project})의 앱 폴더 ${hit}/`;
+  // 서버 웹 프레임워크 프로젝트의 앱 폴더 밖 HTML: 제자리 대신 사본을 만든다
+  else if (!res.app && web) res.web = web;
   return res;
 }
 // .doc-kit.json의 exclude: 경로(out2/), 글롭(out2/**, *.html). 슬래시 없는 글롭은 폴더 깊이와 상관없이 이름에 맞춘다
@@ -425,11 +500,12 @@ export async function handleFile(file, cwd) {
     return {file, kind: r.changed ? 'repaired' : 'ok', result: r};
   }
   const scripted = !isKit && hasOwnScript(source);
-  if (scripted || (!isKit && signals.maybe)) {
+  // 웹 프레임워크 프로젝트에서는 앱 폴더 밖이어도 앱이 쓰는 파일일 수 있어 덮어쓰지 않는다
+  if (scripted || (!isKit && signals.web)) {
     const copy = path.join(path.dirname(file), `${path.basename(file, path.extname(file))}_편집용.html`);
     if (fs.existsSync(copy) && fs.statSync(copy).mtimeMs >= fs.statSync(file).mtimeMs) return {file, kind: 'ok'};
     const r = await ensure(file, {output: copy});
-    return {file: r.file, kind: 'copied', source: file, reason: scripted ? '자체 스크립트나 삽입 요소가 있어' : `프로젝트 신호(${signals.maybe})가 있어`, result: r};
+    return {file: r.file, kind: 'copied', source: file, reason: scripted ? '자체 스크립트나 삽입 요소가 있어' : `${signals.web}가 있는 프로젝트라 앱 파일일 수 있어`, result: r};
   }
   const r = await ensure(file, {});
   return {file, kind: 'wrapped', result: r};
@@ -467,7 +543,14 @@ function describe(results, state, extra) {
 export async function runStop(state, cwd) {
   const began = Date.now();
   const base = state.start ?? began;
-  const since = base - 1500;
+  // 훑을 구간: 이번 턴(시작부터 지금까지)과, 끝날 때 훅이 돌지 못한 지난 턴들(시작부터 마지막 도구 사용까지).
+  // 정상으로 끝난 턴 사이에 사용자나 다른 프로그램이 바꾼 파일은 훑지 않는다
+  const ranges = [...(state.gaps || []).map((g) => ({from: g.from - 1500, to: g.to + 1500, cwd: g.cwd})), {from: base - 1500, to: Infinity, cwd}];
+  const fresh = (ms) => ranges.some((r) => ms >= r.from && ms <= r.to);
+  // 커밋 시각은 초 단위라 여유를 두지 않는다. 작성 시각과 커미터 시각이 모두 턴이 시작된 초 이후이고
+  // 이 저장소에서 git commit으로 만든 커밋만 이번 턴의 커밋으로 본다(rebase·pull로 들어온 커밋은 아니다)
+  const inRange = (sec) => ranges.some((r) => sec >= Math.floor((r.from + 1500) / 1000) && sec * 1000 <= r.to);
+  const committedInTurn = (c) => c !== null && c.local && inRange(c.at) && inRange(c.ct);
   const pathSince = (state.pathsStart ?? base) - 1500;
   const done = state.done || {};
   const already = (p, st) => done[p] === st.mtimeMs; // 지난번에 처리한 뒤 바뀌지 않았다
@@ -482,9 +565,29 @@ export async function runStop(state, cwd) {
   }
   if (missing.length) extra.push(`기록된 파일을 찾지 못했습니다(옮겼거나 지웠을 수 있습니다): ${missing.slice(0, SKIP_NOTES_MAX).join(', ')}. 옮겼다면 새 위치에서 ensure를 실행하세요`);
 
-  const scanned = new Set(isHomeOrRoot(cwd) ? [] : scan(cwd, since));
-  if (state.outsideSince) for (const d of ['Desktop', 'Downloads', 'Documents']) scanShallow(path.join(HOME(), d), state.outsideSince - 1500).forEach((p) => scanned.add(p));
-  for (const d of state.dirs || []) (isHomeOrRoot(d) ? scanShallow(d, since) : scan(d, since)).forEach((p) => scanned.add(p));
+  const scanned = new Set();
+  for (const d of new Set(ranges.map((r) => r.cwd).filter(Boolean))) if (!isHomeOrRoot(d)) scan(d, fresh).forEach((p) => scanned.add(p));
+  if (state.outsideSince) {
+    const outFresh = (ms) => ms >= state.outsideSince - 1500 && fresh(ms);
+    for (const d of state.outsideDirs || OUTSIDE_DIRS) scanShallow(path.join(HOME(), d), outFresh).forEach((p) => scanned.add(p));
+  }
+  for (const d of state.dirs || []) (isHomeOrRoot(d) ? scanShallow(d, fresh) : scan(d, fresh)).forEach((p) => scanned.add(p));
+  // 스크립트만 돌린 턴: 바탕화면·다운로드·문서 폴더에 이번 턴에 바뀐 HTML은 고치지 않고 알린다
+  if (state.scriptSince) {
+    const scriptFresh = (ms) => ms >= state.scriptSince - 1500 && fresh(ms);
+    const seen = new Set([...scanned, ...explicit]);
+    const looks = OUTSIDE_DIRS.flatMap((d) => scanShallow(path.join(HOME(), d), scriptFresh)).filter((p) => {
+      const st = statOf(p);
+      if (seen.has(p) || !st || already(p, st)) return false;
+      try {
+        return !fs.readFileSync(p, 'latin1').includes('data-doc-kit=');
+      } catch {
+        return false;
+      }
+    });
+    looks.slice(0, SKIP_NOTES_MAX).forEach((p) => extra.push(`확인 필요: ${p} (이번 작업 중 생긴 HTML로 보이나 사용자 폴더라 그대로 두었습니다. 문서이면 ensure를 실행하세요)`));
+    if (looks.length > SKIP_NOTES_MAX) extra.push(`확인 필요: 사용자 폴더의 HTML ${looks.length - SKIP_NOTES_MAX}개 더`);
+  }
   const skipNotes = [];
   const passThrough = []; // 상한에 세지 않는다: 이미 키트 파일이거나 제외될 파일
   const candidates = [];
@@ -492,7 +595,11 @@ export async function runStop(state, cwd) {
     const st = statOf(p);
     if (!st || already(p, st) || explicit.includes(p)) continue;
     const git = gitState(p);
-    if (git === 'same') continue;
+    // HEAD와 같아도 이번 턴에 커밋한 파일이면 이번 작업의 결과다. 그 밖은 checkout·pull·rebase 등으로 바뀐 것으로 보고 알린다
+    if (git === 'same' && !committedInTurn(lastCommit(p))) {
+      skipNotes.push({file: p, kind: 'skip', note: `제외: ${p} (git 커밋과 같고 이번 작업에서 커밋한 파일이 아니라 checkout·pull·rebase 등으로 바뀐 것으로 봄. 문서이면 ensure를 실행하세요)`});
+      continue;
+    }
     if (git === 'ignored') {
       skipNotes.push({file: p, kind: 'skip', note: `제외: ${p} (git이 무시하는 파일. 문서이면 ensure를 실행하세요)`});
       continue;
@@ -548,13 +655,22 @@ export async function hook(agent, event) {
   try {
     const f = stateFile(input);
     if (event === 'prompt') {
-      // 끝날 때 훅이 돌지 못한 턴(중단 등)의 파일을 잃지 않도록 기준 시각과 경로를 그대로 둔다.
-      // 기준 시각은 끝날 때 훅이 처리를 마친 뒤에만 옮긴다
+      // 새 턴의 기준 시각은 지금이다. 지난 턴이 끝날 때 훅 없이 끝났으면(중단 등) 그 턴의 구간을
+      // 미처리 구간으로 남겨 다음 끝날 때 함께 훑는다. 도구로 쓴 경로 기록은 그대로 둔다
       const s = load(f);
       const now = Date.now();
-      if (!s) store(f, {start: now, turnAt: now, cwd: cwdOf(input), paths: []});
-      else if (now - (s.start ?? 0) > STALE_MS) store(f, {...s, pathsStart: s.pathsStart ?? s.start, start: now, turnAt: now, cwd: cwdOf(input), dirs: [], outsideSince: null});
-      else store(f, {...s, turnAt: now, cwd: cwdOf(input)});
+      const cwd = cwdOf(input);
+      if (!s) store(f, {start: now, turnAt: now, cwd, paths: [], open: true});
+      else {
+        const gaps = (s.gaps || []).filter((g) => g.to >= now - STALE_MS);
+        if (s.open && s.start) {
+          const to = Math.max(s.lastPost ?? 0, s.turnAt ?? s.start);
+          if (to >= now - STALE_MS) gaps.push({from: s.start, to, cwd: s.cwd});
+        }
+        const keep = gaps.length > 0;
+        const paths = s.paths || [];
+        store(f, {...s, start: now, turnAt: now, cwd, open: true, lastPost: null, gaps: gaps.slice(-5), paths, pathsStart: paths.length ? (s.pathsStart ?? s.start) : null, dirs: keep ? s.dirs : [], outsideDirs: keep ? s.outsideDirs : [], outsideSince: keep ? s.outsideSince : null, scriptSince: keep ? s.scriptSince : null});
+      }
     } else if (event === 'post') {
       const s = load(f) || {start: Date.now(), cwd: cwdOf(input), paths: []};
       const e = effectsOf(input);
@@ -562,14 +678,19 @@ export async function hook(agent, event) {
       s.paths = merge(s.paths, e.written).filter((p) => !e.removed.has(p) || e.written.has(p));
       if (e.dirs.size) s.dirs = merge(s.dirs, e.dirs);
       if (e.unknown.size) s.unknown = merge(s.unknown, e.unknown).slice(0, 10);
-      if (e.outside && !s.outsideSince) s.outsideSince = s.turnAt ?? s.start;
+      if (e.outside.size) {
+        s.outsideDirs = merge(s.outsideDirs, e.outside);
+        s.outsideSince ||= s.turnAt ?? s.start;
+      }
+      if (e.ran) s.scriptSince ||= s.turnAt ?? s.start;
+      s.lastPost = Date.now();
       store(f, s);
     } else if (event === 'stop') {
       const s = load(f) || {start: Date.now() - 600000, paths: []};
       const cwd = s.cwd || cwdOf(input);
       const {lines, urgent, failed, pending, handled} = await runStop(s, cwd);
       // 모두 처리한 뒤에야 기준 시각을 옮긴다. 처리 못 한 파일이 있으면 그대로 두어 다음에 다시 찾는다
-      store(f, pending.length ? {...s, cwd, paths: pending, unknown: [], done: {...s.done, ...handled}} : {start: Date.now(), turnAt: s.turnAt, cwd, paths: [], done: handled});
+      store(f, pending.length ? {...s, cwd, open: false, gaps: [], paths: pending, unknown: [], done: {...s.done, ...handled}} : {start: Date.now(), turnAt: s.turnAt, cwd, open: false, paths: [], done: handled});
       if (lines.length) note(lines.join(' / '));
       if (lines.length) {
         const message = 'html-doc-kit: ' + lines.join('\n');

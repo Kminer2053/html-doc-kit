@@ -8415,14 +8415,38 @@ function parse(html, options) {
 
 // src/cli/html.mjs
 var strict = (label, buf) => new TextDecoder(label, { fatal: true }).decode(buf);
-function decodeHtml(buf, { sniff = true } = {}) {
-  if (buf[0] === 239 && buf[1] === 187 && buf[2] === 191) return strict("utf-8", buf);
+function utf8(buf, warn) {
+  try {
+    return strict("utf-8", buf);
+  } catch (e) {
+    for (let k = 1; k <= 3 && k < buf.length; k++) {
+      const lead = buf[buf.length - k];
+      if (lead < 194 || lead > 244) {
+        if (lead >= 128 && lead <= 191) continue;
+        break;
+      }
+      const need2 = lead >= 240 ? 4 : lead >= 224 ? 3 : 2;
+      if (k >= need2) break;
+      let text;
+      try {
+        text = strict("utf-8", buf.subarray(0, buf.length - k));
+      } catch {
+        break;
+      }
+      if (warn) warn(`\uD30C\uC77C \uB05D\uC5D0\uC11C \uC798\uB9B0 \uAE00\uC790 \uC870\uAC01(${k}\uBC14\uC774\uD2B8)\uC744 \uBE7C\uACE0 \uC77D\uC5C8\uC2B5\uB2C8\uB2E4. \uD30C\uC77C\uC774 \uB05D\uAE4C\uC9C0 \uC800\uC7A5\uB418\uC5C8\uB294\uC9C0 \uD655\uC778\uD558\uC138\uC694`);
+      return text;
+    }
+    throw e;
+  }
+}
+function decodeHtml(buf, { sniff = true, warn } = {}) {
+  if (buf[0] === 239 && buf[1] === 187 && buf[2] === 191) return utf8(buf, warn);
   if (buf[0] === 255 && buf[1] === 254) return strict("utf-16le", buf);
   if (buf[0] === 254 && buf[1] === 255) return strict("utf-16be", buf);
   if (buf[0] === 60 && buf[1] === 0) return strict("utf-16le", buf);
   if (buf[0] === 0 && buf[1] === 60) return strict("utf-16be", buf);
   try {
-    return strict("utf-8", buf);
+    return utf8(buf, warn);
   } catch {
   }
   const head = buf.subarray(0, 4096).toString("latin1");
@@ -9920,6 +9944,22 @@ var VISIBLE = `(()=>{
     return null;
   };
   const sameColor=(a,b)=>Math.abs(a.r-b.r)+Math.abs(a.g-b.g)+Math.abs(a.b-b.b)<12;
+  // \uBB38\uC11C\uAC00 \uC2A4\uC2A4\uB85C \uC228\uAE34 \uAE00(hidden \uC18D\uC131, \uB2EB\uD78C dialog\xB7details, aria-hidden, noscript, template). \uBB38\uC11C CSS \uC5C6\uC774\uB3C4 \uC548 \uBCF4\uC774\uBBC0\uB85C \uBCF4\uC774\uB294 \uBE44\uC728\uC758 \uBD84\uBAA8\uC5D0 \uB123\uC9C0 \uC54A\uB294\uB2E4
+  const selfHidden=(e)=>{
+    if(e.closest('[hidden],dialog:not([open]),[aria-hidden="true"],noscript,template'))return true;
+    const d=e.closest('details:not([open])');if(!d)return false;
+    const s=e.closest('summary');return !(s&&s.parentElement===d);
+  };
+  // \uAE00\uC790\uB97C \uCE60\uD558\uB294 \uB2E4\uB978 \uBC29\uBC95: \uC678\uACFD\uC120\xB7\uADF8\uB9BC\uC790, \uBC30\uACBD\uC744 \uAE00\uC790 \uBAA8\uC591\uC73C\uB85C \uC790\uB974\uAE30(\uADF8\uB77C\uB370\uC774\uC158 \uAE00\uC790)
+  const decorated=(c)=>c.textShadow!=='none'||parseFloat(c.webkitTextStrokeWidth||0)>0;
+  const clipped=(e)=>{
+    for(let x=e;x;x=x.parentElement){
+      const s=getComputedStyle(x);
+      if((s.backgroundClip==='text'||s.webkitBackgroundClip==='text')&&(s.backgroundImage!=='none'||(rgba(s.backgroundColor)||{a:0}).a>=0.05))return true;
+      if(x.classList&&x.classList.contains('dk-page'))break;
+    }
+    return false;
+  };
   pages.forEach((p,i)=>{
     dkKit.go(i);
     const fixed=p.hasAttribute('data-dk-fixed');
@@ -9928,10 +9968,15 @@ var VISIBLE = `(()=>{
     const w=document.createTreeWalker(p,NodeFilter.SHOW_TEXT);let all=0,seen=0,sampled=0,covered=0,probes=0,below=false;
     for(let n=w.nextNode();n;n=w.nextNode()){
       const t=n.nodeValue.trim();if(!t||n.parentElement.closest('style,script,svg,select,textarea,datalist'))continue;
+      if(selfHidden(n.parentElement)){const r=document.createRange();r.selectNodeContents(n);if(!r.getClientRects().length)continue}
       all+=t.length;
       const e=n.parentElement;const c=getComputedStyle(e);
       if(c.visibility!=='visible')continue;
-      const color=rgba(c.color);if(color&&color.a<0.05)continue;
+      // \uC2E4\uC81C\uB85C \uCE60\uD558\uB294 \uAE00\uC790\uC0C9\uC740 -webkit-text-fill-color\uB2E4(\uB530\uB85C \uC815\uD558\uC9C0 \uC54A\uC73C\uBA74 color\uC640 \uAC19\uB2E4)
+      const fill=rgba(c.webkitTextFillColor||'')||rgba(c.color);
+      const deco=decorated(c);
+      if(fill&&fill.a<0.05&&!deco&&!clipped(e))continue;
+      const color=fill&&fill.a>=0.05&&!deco?fill:null;
       if(opacity(e,p)<0.05)continue;
       if(parseFloat(c.fontSize)<3)continue;
       const r=document.createRange();r.selectNodeContents(n);const b=r.getBoundingClientRect();
@@ -9953,7 +9998,7 @@ var VISIBLE = `(()=>{
         probes++;sampled+=t.length;
         const stack=document.elementsFromPoint(cx,cy);
         if(c.pointerEvents!=='none'&&!stack.includes(e)){covered+=t.length;continue}
-        if(color&&c.textShadow==='none'&&parseFloat(c.webkitTextStrokeWidth||0)===0){
+        if(color){
           const k=paper(e,stack);if(k&&sameColor(color,k)){covered+=t.length;continue}
         }
       }
@@ -11628,6 +11673,7 @@ function inlineCssUrls(css, baseDir, warn) {
 function sanitize(root, baseDir, warn) {
   const css = [];
   let scripts = 0;
+  const dropped = /* @__PURE__ */ new Map();
   walk(root, (n) => {
     if (!isEl(n)) return true;
     if (n.tagName === "plaintext") {
@@ -11641,6 +11687,7 @@ function sanitize(root, baseDir, warn) {
     }
     if (DROP.has(tag)) {
       if (tag === "script" && !(attr(n, "id") || "").startsWith("dk-")) scripts++;
+      if (tag !== "script") dropped.set(tag, (dropped.get(tag) || 0) + 1);
       remove(n);
       return false;
     }
@@ -11697,6 +11744,7 @@ function sanitize(root, baseDir, warn) {
     return true;
   });
   if (scripts) warn(`\uC2A4\uD06C\uB9BD\uD2B8 ${scripts}\uAC1C\uB97C \uBE90\uC2B5\uB2C8\uB2E4. \uCC28\uD2B8\uB294 SVG\uB098 \uD45C\uB85C \uB123\uC5B4 \uC8FC\uC138\uC694`);
+  if (dropped.size) warn(`\uC9C0\uC6B4 \uC694\uC18C: ${[...dropped].map(([t, k]) => `${t} ${k}\uAC1C`).join(", ")}(\uBDF0\uC5B4 \uC548\uC5D0\uC11C \uC678\uBD80 \uB0B4\uC6A9\uC744 \uB744\uC6B0\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4)`);
   return css.join("\n");
 }
 function metaOf(head, name) {
@@ -11839,7 +11887,7 @@ var newId = () => crypto2.randomBytes(6).toString("hex");
 function readSource(file, opts, warn) {
   const baseDir = path2.dirname(path2.resolve(file));
   const isMd = /\.(md|markdown)$/i.test(file);
-  const source = restoreAssets(readHtml(file, { sniff: !isMd }), file);
+  const source = restoreAssets(readHtml(file, { sniff: !isMd, warn }), file);
   return readSourceText(source, baseDir, isMd, opts, warn);
 }
 var assetsFile = (bodyFile) => `${bodyFile}.assets.json`;
@@ -12117,7 +12165,7 @@ async function ensure(file, opts = {}) {
   const wanted = opts.output || (isMd ? file.replace(MD, ".html") : file);
   const inPlace = samePath(wanted, file);
   if (isMd && inPlace) throw new Error("\uACB0\uACFC \uD30C\uC77C\uC774 \uC785\uB825 \uB9C8\uD06C\uB2E4\uC6B4\uACFC \uAC19\uC2B5\uB2C8\uB2E4. -o\uB85C .html \uACBD\uB85C\uB97C \uC9C0\uC815\uD558\uC138\uC694");
-  const source = readHtml(file, { sniff: !isMd });
+  const source = readHtml(file, { sniff: !isMd, warn });
   if (isOff(source)) return { file, excluded: true, warnings, notices, c6: { status: "skip", reason: "\uC81C\uC678 \uD45C\uC2DD", warnings: [] }, changed: false };
   const report2 = isMd ? { errors: ["\uC785\uB825\uC774 \uB9C8\uD06C\uB2E4\uC6B4\uC785\uB2C8\uB2E4"] } : inspect(source);
   if (report2.newer) {
@@ -12145,7 +12193,8 @@ async function ensure(file, opts = {}) {
   return { file: to, warnings: [...warnings, ...done.c6.warnings], notices, c6: done.c6, changed: true, repaired: report2.errors, backup: saved };
 }
 async function check(file, opts = {}) {
-  const source = readHtml(file);
+  const readWarnings = [];
+  const source = readHtml(file, { warn: (m) => readWarnings.push(m) });
   if (isOff(source)) return { file, status: "excluded", errors: [], warnings: [], c6: { status: "skip", reason: "\uC81C\uC678 \uD45C\uC2DD" } };
   const report2 = inspect(source);
   if (report2.newer) return { file, status: "complete", errors: [], warnings: [`\uD30C\uC77C\uC758 \uD0A4\uD2B8(${report2.version})\uAC00 \uC124\uCE58\uB41C \uD0A4\uD2B8(${VERSION})\uBCF4\uB2E4 \uC0C8\uAC83\uC774\uB77C \uBD80\uD488\uC774 \uC788\uB294\uC9C0\uB9CC \uBCF4\uC558\uC2B5\uB2C8\uB2E4`], c6: { status: "skip", reason: "\uB354 \uC0C8 \uBC84\uC804", warnings: [] }, pages: report2.pages, version: report2.version };
@@ -12153,7 +12202,7 @@ async function check(file, opts = {}) {
   const errors = [...report2.errors];
   if (c6.status === "fail") errors.push(`C6 ${c6.reason}`);
   const inputFor = errors.length ? inputOf(file) : null;
-  return { file, status: errors.length ? "incomplete" : "complete", errors, warnings: c6.warnings || [], c6, pages: report2.pages, version: report2.version, ...inputFor ? { inputFor } : {} };
+  return { file, status: errors.length ? "incomplete" : "complete", errors, warnings: [...readWarnings, ...c6.warnings || []], c6, pages: report2.pages, version: report2.version, ...inputFor ? { inputFor } : {} };
 }
 function extract(file, output) {
   const warnings = [];
@@ -12444,12 +12493,23 @@ import os4 from "node:os";
 import path5 from "node:path";
 var HOME = () => process.env.DOC_KIT_HOME || os4.homedir();
 var stateDir = () => path5.join(HOME(), ".doc-kit", "state");
-var APP_DIRS = /* @__PURE__ */ new Set(["node_modules", "bower_components", "src", "public", "dist", "build", "static", "views", "templates", "partials", "emails", "_build", "_site", "site", "coverage", "htmlcov", "lcov-report", "test-results", "playwright-report", "storybook-static", "venv", "__pycache__", ".next", ".nuxt", ".svelte-kit", ".venv", ".git", ".doc-kit"]);
-var SCAN_SKIP = /* @__PURE__ */ new Set([...APP_DIRS, "Library", "AppData", "Applications"]);
+var SYSTEM_DIRS = /* @__PURE__ */ new Set(["node_modules", "bower_components", "venv", "__pycache__", ".next", ".nuxt", ".svelte-kit", ".venv", ".git", ".doc-kit", "coverage", "htmlcov", "lcov-report", "test-results", "playwright-report", "storybook-static"]);
+var APP_DIRS = /* @__PURE__ */ new Set(["src", "public", "dist", "build", "static", "views", "templates", "partials", "emails", "layouts", "_build", "_site", "site"]);
+var SCAN_SKIP = /* @__PURE__ */ new Set([...SYSTEM_DIRS, "Library", "AppData", "Applications"]);
 var WEB_DEPS = /* @__PURE__ */ new Set(["react", "vue", "svelte", "next", "nuxt", "vite", "webpack", "astro", "gatsby", "parcel", "solid-js", "remix", "electron", "express", "koa", "fastify", "hono", "preact", "lit", "tailwindcss", "ember-source", "vuepress", "vitepress", "hexo", "nest", "polka", "restify", "hapi"]);
 var WEB_DEP_SCOPES = /^@(angular|sveltejs|11ty|remix-run|nestjs|docusaurus|hono|hapi|nuxt|tanstack)\//;
-var BUILD_CONFIG = /^(?:(?:vite|vitest|next|nuxt|astro|webpack|svelte|remix|rollup|parcel|gatsby|tailwind|eleventy|quasar|vue|docusaurus|rspack|rsbuild)\.config\.[cm]?[jt]sx?|\.eleventy\.[cm]?js|angular\.json|manage\.py|Gemfile|mkdocs\.ya?ml|_config\.ya?ml|hugo\.(?:toml|ya?ml|json)|artisan|vercel\.json|netlify\.toml|firebase\.json)$/;
-var MAYBE_APP = /^(?:go\.mod|pyproject\.toml|setup\.py|requirements\.txt|composer\.json|conf\.py|Cargo\.toml|pom\.xml|build\.gradle(?:\.kts)?|mix\.exs)$/;
+var BUILD_CONFIG = /^(?:(?:vite|vitest|next|nuxt|astro|webpack|svelte|remix|rollup|parcel|gatsby|tailwind|eleventy|quasar|vue|docusaurus|rspack|rsbuild)\.config\.[cm]?[jt]sx?|\.eleventy\.[cm]?js|angular\.json|manage\.py|mkdocs\.ya?ml|_config\.ya?ml|hugo\.(?:toml|ya?ml|json)|artisan|vercel\.json|netlify\.toml|firebase\.json)$/;
+var LANG_FILES = [
+  [/^(?:requirements[\w.-]*\.txt|pyproject\.toml|setup\.py|setup\.cfg|Pipfile)$/, ["flask", "django", "fastapi", "starlette", "bottle", "pyramid", "sanic", "aiohttp", "quart", "falcon", "cherrypy", "litestar"]],
+  [/^Gemfile$/, ["rails", "sinatra", "hanami", "roda", "padrino"]],
+  [/^go\.mod$/, ["gin-gonic", "labstack/echo", "gofiber", "go-chi", "gorilla/mux", "beego", "revel", "gobuffalo"]],
+  [/^composer\.json$/, ["laravel", "symfony/framework-bundle", "symfony/http-kernel", "slim/slim", "cakephp", "yiisoft", "codeigniter", "laminas"]],
+  [/^Cargo\.toml$/, ["actix-web", "axum", "rocket", "warp", "tide", "poem", "leptos"]],
+  [/^(?:pom\.xml|build\.gradle(?:\.kts)?)$/, ["spring-boot", "spring-webmvc", "quarkus", "micronaut", "jakarta.servlet", "javax.servlet"]],
+  [/^mix\.exs$/, ["phoenix", "plug"]]
+].map(([re2, names]) => [re2, new RegExp(`(?:^|[^\\w-])(${names.map((n) => n.replace(/[.]/g, "\\.")).join("|")})(?!\\w)`, "im")]);
+var OUTSIDE_DIRS = ["Desktop", "Downloads", "Documents"];
+var OUTSIDE_RE = /(?:^|[^\w.-])(Desktop|Downloads|Documents)(?=$|[/\s'"`;|&)])/g;
 var SCAN_FILES_MAX = 5;
 var SCAN_ENTRIES_MAX = 2e4;
 var SKIP_NOTES_MAX = 8;
@@ -12578,13 +12638,17 @@ function shellCommands(src) {
   end();
   return cmds;
 }
-var SCRIPT_RUNNER = /^(?:python[\d.]*|node|deno|bun|ruby|perl|php|bash|sh|zsh|npx|uv|npm|pnpm|yarn|make|osascript)$/;
-var SCRIPT_FILE = /\.(?:py|sh|js|mjs|cjs|ts|rb|pl|php)$/;
+var READ_ONLY = /* @__PURE__ */ new Set(["ls", "cat", "head", "tail", "less", "more", "grep", "egrep", "rg", "find", "fd", "wc", "pwd", "echo", "printf", "which", "type", "stat", "file", "du", "df", "tree", "diff", "true", "false", "test", "[", "sleep", "date", "whoami", "uname", "env", "printenv"]);
+var READ_ONLY_GIT = /* @__PURE__ */ new Set(["status", "log", "diff", "show", "branch", "remote", "rev-parse", "ls-files", "blame", "describe"]);
 var SHELL_WORDS = /* @__PURE__ */ new Set(["do", "then", "else", "elif", "if", "while", "until", "!", "{", "}", "sudo", "command", "nohup", "time", "env", "exec", "export"]);
 var ASSIGN = /^[A-Za-z_]\w*=/;
+function outsideDirsOf(cmd2) {
+  if (/\.html?\b/i.test(cmd2)) return new Set(OUTSIDE_DIRS);
+  return new Set([...cmd2.matchAll(OUTSIDE_RE)].map((m) => m[1]));
+}
 function readShell(cmd2, cwd) {
   const home = HOME();
-  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), outside: /\.html?\b/i.test(cmd2) };
+  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), outside: outsideDirsOf(cmd2), ran: false };
   const vars = { HOME: home };
   let dir = cwd;
   const expand = (w2) => {
@@ -12623,7 +12687,7 @@ function readShell(cmd2, cwd) {
     const a3 = args.slice(k);
     if (!a3.length) continue;
     const prog = path5.basename(a3[0]);
-    if (SCRIPT_RUNNER.test(prog) || SCRIPT_FILE.test(a3[0])) out.outside = true;
+    if (!["cd", "pushd", "popd"].includes(prog) && !READ_ONLY.has(prog) && !(prog === "git" && READ_ONLY_GIT.has(a3[1]))) out.ran = true;
     if (prog === "cd" || prog === "pushd") {
       const { s, unresolved } = expand(a3[1] ?? "~");
       dir = unresolved || s === "-" ? null : abs(s);
@@ -12676,7 +12740,7 @@ function readShell(cmd2, cwd) {
 }
 function effectsOf(i) {
   const cwd = cwdOf(i);
-  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), outside: false };
+  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), dirs: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), outside: /* @__PURE__ */ new Set(), ran: false };
   const add = (p) => {
     if (typeof p === "string" && isHtml(p)) out.written.add(path5.resolve(cwd, p.replace(/^~(?=\/)/, HOME())));
   };
@@ -12689,12 +12753,12 @@ function effectsOf(i) {
       continue;
     }
     const r = readShell(text, cwd);
-    for (const k of ["written", "removed", "dirs", "unknown"]) r[k].forEach((v) => out[k].add(v));
-    out.outside ||= r.outside;
+    for (const k of ["written", "removed", "dirs", "unknown", "outside"]) r[k].forEach((v) => out[k].add(v));
+    out.ran ||= r.ran;
   }
   return out;
 }
-function scan(dir, since, found = [], depth = 0, budget = { left: SCAN_ENTRIES_MAX }) {
+function scan(dir, fresh, found = [], depth = 0, budget = { left: SCAN_ENTRIES_MAX }) {
   if (depth > 6 || found.length > 500 || budget.left <= 0) return found;
   let list;
   try {
@@ -12706,16 +12770,16 @@ function scan(dir, since, found = [], depth = 0, budget = { left: SCAN_ENTRIES_M
   for (const e of list) {
     const p = path5.join(dir, e.name);
     if (e.isDirectory()) {
-      if (!e.name.startsWith(".") && !SCAN_SKIP.has(e.name)) scan(p, since, found, depth + 1, budget);
+      if (!e.name.startsWith(".") && !SCAN_SKIP.has(e.name)) scan(p, fresh, found, depth + 1, budget);
     } else if (e.isFile() && isHtml(e.name)) {
-      if ((statOf(p)?.mtimeMs ?? 0) >= since) found.push(p);
+      if (fresh(statOf(p)?.mtimeMs ?? 0)) found.push(p);
     }
   }
   return found;
 }
-function scanShallow(dir, since) {
+function scanShallow(dir, fresh) {
   try {
-    return fs6.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && isHtml(e.name)).map((e) => path5.join(dir, e.name)).filter((p) => (statOf(p)?.mtimeMs ?? 0) >= since);
+    return fs6.readdirSync(dir, { withFileTypes: true }).filter((e) => e.isFile() && isHtml(e.name)).map((e) => path5.join(dir, e.name)).filter((p) => fresh(statOf(p)?.mtimeMs ?? 0));
   } catch {
     return [];
   }
@@ -12732,6 +12796,16 @@ function gitState(file) {
   if (!r.stdout.trim()) return "same";
   return r.stdout.startsWith("!!") ? "ignored" : "changed";
 }
+function lastCommit(file) {
+  const dir = path5.dirname(path5.resolve(file));
+  const r = spawnSync("git", ["-C", dir, "log", "-1", "--format=%H %at %ct", "--", path5.basename(file)], { encoding: "utf-8", timeout: 5e3 });
+  const [hash, at2, ct2] = (r.status === 0 ? r.stdout.trim() : "").split(" ");
+  if (!hash || !(Number(at2) > 0) || !(Number(ct2) > 0)) return null;
+  const g = spawnSync("git", ["-C", dir, "reflog", "-n", "500", "--format=%H %gs"], { encoding: "utf-8", timeout: 5e3 });
+  const lines = g.status === 0 ? g.stdout.split("\n").filter(Boolean) : [];
+  const local = !lines.length || lines.some((l) => l.startsWith(`${hash} commit`));
+  return { at: Number(at2), ct: Number(ct2), local };
+}
 function projectRoot(file, cwd) {
   const abs = path5.resolve(file);
   for (let d = path5.dirname(abs); ; d = path5.dirname(d)) {
@@ -12740,11 +12814,28 @@ function projectRoot(file, cwd) {
   }
   return cwd && abs.startsWith(path5.resolve(cwd) + path5.sep) ? path5.resolve(cwd) : path5.dirname(abs);
 }
+var readHead = (f) => {
+  try {
+    const fd = fs6.openSync(f, "r");
+    const buf = Buffer.alloc(2e5);
+    const n = fs6.readSync(fd, buf, 0, buf.length, 0);
+    fs6.closeSync(fd);
+    return buf.subarray(0, n).toString("utf-8");
+  } catch {
+    return "";
+  }
+};
 function projectSignals(file, cwd) {
   const root = projectRoot(file, cwd);
-  const res = { app: null, maybe: null };
-  const hit = path5.relative(root, path5.resolve(file)).split(path5.sep).slice(0, -1).find((s) => APP_DIRS.has(s));
-  if (hit) res.app = `\uC571\xB7\uBE4C\uB4DC \uD3F4\uB354 ${hit}/`;
+  const res = { app: null, web: null };
+  const segs = path5.relative(root, path5.resolve(file)).split(path5.sep).slice(0, -1);
+  const sys = segs.find((x2) => SYSTEM_DIRS.has(x2));
+  if (sys) {
+    res.app = `\uC758\uC874\uC131\xB7\uB9AC\uD3EC\uD2B8 \uD3F4\uB354 ${sys}/`;
+    return res;
+  }
+  let project = null;
+  let web = null;
   for (let d = path5.dirname(path5.resolve(file)); !res.app; d = path5.dirname(d)) {
     let names = [];
     try {
@@ -12757,10 +12848,24 @@ function projectSignals(file, cwd) {
     if (pj && !res.app) {
       const dep = Object.keys({ ...pj.dependencies, ...pj.devDependencies, ...pj.peerDependencies }).find((k) => WEB_DEPS.has(k) || WEB_DEP_SCOPES.test(k));
       if (dep) res.app = `\uC6F9\uC571 \uC758\uC874\uC131 ${dep}`;
+      else project ||= "package.json";
     }
-    res.maybe ||= names.find((n) => MAYBE_APP.test(n)) || null;
+    if (!res.app && names.includes("conf.py") && /\bsphinx\b|^\s*html_theme\s*=/m.test(readHead(path5.join(d, "conf.py")))) project ||= "conf.py";
+    for (const n of res.app || web ? [] : names) {
+      const rule = LANG_FILES.find(([re2]) => re2.test(n));
+      if (!rule) continue;
+      const m = rule[1].exec(readHead(path5.join(d, n)));
+      if (m) {
+        web = `\uC6F9 \uD504\uB808\uC784\uC6CC\uD06C ${m[1]}(${n})`;
+        break;
+      }
+      project ||= n;
+    }
     if (d === root || d === path5.dirname(d)) break;
   }
+  const hit = !res.app && (web || project) && segs.find((x2) => APP_DIRS.has(x2));
+  if (hit) res.app = web ? `${web}\uC758 \uC571 \uD3F4\uB354 ${hit}/` : `\uCF54\uB4DC \uD504\uB85C\uC81D\uD2B8(${project})\uC758 \uC571 \uD3F4\uB354 ${hit}/`;
+  else if (!res.app && web) res.web = web;
   return res;
 }
 var globToRe = (glob) => {
@@ -12829,11 +12934,11 @@ async function handleFile(file, cwd) {
     return { file, kind: r2.changed ? "repaired" : "ok", result: r2 };
   }
   const scripted = !isKit && hasOwnScript(source);
-  if (scripted || !isKit && signals.maybe) {
+  if (scripted || !isKit && signals.web) {
     const copy = path5.join(path5.dirname(file), `${path5.basename(file, path5.extname(file))}_\uD3B8\uC9D1\uC6A9.html`);
     if (fs6.existsSync(copy) && fs6.statSync(copy).mtimeMs >= fs6.statSync(file).mtimeMs) return { file, kind: "ok" };
     const r2 = await ensure(file, { output: copy });
-    return { file: r2.file, kind: "copied", source: file, reason: scripted ? "\uC790\uCCB4 \uC2A4\uD06C\uB9BD\uD2B8\uB098 \uC0BD\uC785 \uC694\uC18C\uAC00 \uC788\uC5B4" : `\uD504\uB85C\uC81D\uD2B8 \uC2E0\uD638(${signals.maybe})\uAC00 \uC788\uC5B4`, result: r2 };
+    return { file: r2.file, kind: "copied", source: file, reason: scripted ? "\uC790\uCCB4 \uC2A4\uD06C\uB9BD\uD2B8\uB098 \uC0BD\uC785 \uC694\uC18C\uAC00 \uC788\uC5B4" : `${signals.web}\uAC00 \uC788\uB294 \uD504\uB85C\uC81D\uD2B8\uB77C \uC571 \uD30C\uC77C\uC77C \uC218 \uC788\uC5B4`, result: r2 };
   }
   const r = await ensure(file, {});
   return { file, kind: "wrapped", result: r };
@@ -12868,7 +12973,10 @@ function describe(results, state, extra) {
 async function runStop(state, cwd) {
   const began = Date.now();
   const base = state.start ?? began;
-  const since = base - 1500;
+  const ranges = [...(state.gaps || []).map((g) => ({ from: g.from - 1500, to: g.to + 1500, cwd: g.cwd })), { from: base - 1500, to: Infinity, cwd }];
+  const fresh = (ms) => ranges.some((r) => ms >= r.from && ms <= r.to);
+  const inRange = (sec) => ranges.some((r) => sec >= Math.floor((r.from + 1500) / 1e3) && sec * 1e3 <= r.to);
+  const committedInTurn = (c2) => c2 !== null && c2.local && inRange(c2.at) && inRange(c2.ct);
   const pathSince = (state.pathsStart ?? base) - 1500;
   const done = state.done || {};
   const already = (p, st2) => done[p] === st2.mtimeMs;
@@ -12881,9 +12989,28 @@ async function runStop(state, cwd) {
     else if (st2.isFile() && Math.max(st2.mtimeMs, st2.ctimeMs) >= pathSince && !already(p, st2)) explicit.push(p);
   }
   if (missing.length) extra.push(`\uAE30\uB85D\uB41C \uD30C\uC77C\uC744 \uCC3E\uC9C0 \uBABB\uD588\uC2B5\uB2C8\uB2E4(\uC62E\uACBC\uAC70\uB098 \uC9C0\uC6E0\uC744 \uC218 \uC788\uC2B5\uB2C8\uB2E4): ${missing.slice(0, SKIP_NOTES_MAX).join(", ")}. \uC62E\uACBC\uB2E4\uBA74 \uC0C8 \uC704\uCE58\uC5D0\uC11C ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
-  const scanned = new Set(isHomeOrRoot(cwd) ? [] : scan(cwd, since));
-  if (state.outsideSince) for (const d of ["Desktop", "Downloads", "Documents"]) scanShallow(path5.join(HOME(), d), state.outsideSince - 1500).forEach((p) => scanned.add(p));
-  for (const d of state.dirs || []) (isHomeOrRoot(d) ? scanShallow(d, since) : scan(d, since)).forEach((p) => scanned.add(p));
+  const scanned = /* @__PURE__ */ new Set();
+  for (const d of new Set(ranges.map((r) => r.cwd).filter(Boolean))) if (!isHomeOrRoot(d)) scan(d, fresh).forEach((p) => scanned.add(p));
+  if (state.outsideSince) {
+    const outFresh = (ms) => ms >= state.outsideSince - 1500 && fresh(ms);
+    for (const d of state.outsideDirs || OUTSIDE_DIRS) scanShallow(path5.join(HOME(), d), outFresh).forEach((p) => scanned.add(p));
+  }
+  for (const d of state.dirs || []) (isHomeOrRoot(d) ? scanShallow(d, fresh) : scan(d, fresh)).forEach((p) => scanned.add(p));
+  if (state.scriptSince) {
+    const scriptFresh = (ms) => ms >= state.scriptSince - 1500 && fresh(ms);
+    const seen = /* @__PURE__ */ new Set([...scanned, ...explicit]);
+    const looks = OUTSIDE_DIRS.flatMap((d) => scanShallow(path5.join(HOME(), d), scriptFresh)).filter((p) => {
+      const st2 = statOf(p);
+      if (seen.has(p) || !st2 || already(p, st2)) return false;
+      try {
+        return !fs6.readFileSync(p, "latin1").includes("data-doc-kit=");
+      } catch {
+        return false;
+      }
+    });
+    looks.slice(0, SKIP_NOTES_MAX).forEach((p) => extra.push(`\uD655\uC778 \uD544\uC694: ${p} (\uC774\uBC88 \uC791\uC5C5 \uC911 \uC0DD\uAE34 HTML\uB85C \uBCF4\uC774\uB098 \uC0AC\uC6A9\uC790 \uD3F4\uB354\uB77C \uADF8\uB300\uB85C \uB450\uC5C8\uC2B5\uB2C8\uB2E4. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)`));
+    if (looks.length > SKIP_NOTES_MAX) extra.push(`\uD655\uC778 \uD544\uC694: \uC0AC\uC6A9\uC790 \uD3F4\uB354\uC758 HTML ${looks.length - SKIP_NOTES_MAX}\uAC1C \uB354`);
+  }
   const skipNotes = [];
   const passThrough = [];
   const candidates = [];
@@ -12891,7 +13018,10 @@ async function runStop(state, cwd) {
     const st2 = statOf(p);
     if (!st2 || already(p, st2) || explicit.includes(p)) continue;
     const git = gitState(p);
-    if (git === "same") continue;
+    if (git === "same" && !committedInTurn(lastCommit(p))) {
+      skipNotes.push({ file: p, kind: "skip", note: `\uC81C\uC678: ${p} (git \uCEE4\uBC0B\uACFC \uAC19\uACE0 \uC774\uBC88 \uC791\uC5C5\uC5D0\uC11C \uCEE4\uBC0B\uD55C \uD30C\uC77C\uC774 \uC544\uB2C8\uB77C checkout\xB7pull\xB7rebase \uB4F1\uC73C\uB85C \uBC14\uB010 \uAC83\uC73C\uB85C \uBD04. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)` });
+      continue;
+    }
     if (git === "ignored") {
       skipNotes.push({ file: p, kind: "skip", note: `\uC81C\uC678: ${p} (git\uC774 \uBB34\uC2DC\uD558\uB294 \uD30C\uC77C. \uBB38\uC11C\uC774\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694)` });
       continue;
@@ -12950,9 +13080,18 @@ async function hook(agent, event) {
     if (event === "prompt") {
       const s = load(f);
       const now = Date.now();
-      if (!s) store(f, { start: now, turnAt: now, cwd: cwdOf(input), paths: [] });
-      else if (now - (s.start ?? 0) > STALE_MS) store(f, { ...s, pathsStart: s.pathsStart ?? s.start, start: now, turnAt: now, cwd: cwdOf(input), dirs: [], outsideSince: null });
-      else store(f, { ...s, turnAt: now, cwd: cwdOf(input) });
+      const cwd = cwdOf(input);
+      if (!s) store(f, { start: now, turnAt: now, cwd, paths: [], open: true });
+      else {
+        const gaps = (s.gaps || []).filter((g) => g.to >= now - STALE_MS);
+        if (s.open && s.start) {
+          const to = Math.max(s.lastPost ?? 0, s.turnAt ?? s.start);
+          if (to >= now - STALE_MS) gaps.push({ from: s.start, to, cwd: s.cwd });
+        }
+        const keep = gaps.length > 0;
+        const paths2 = s.paths || [];
+        store(f, { ...s, start: now, turnAt: now, cwd, open: true, lastPost: null, gaps: gaps.slice(-5), paths: paths2, pathsStart: paths2.length ? s.pathsStart ?? s.start : null, dirs: keep ? s.dirs : [], outsideDirs: keep ? s.outsideDirs : [], outsideSince: keep ? s.outsideSince : null, scriptSince: keep ? s.scriptSince : null });
+      }
     } else if (event === "post") {
       const s = load(f) || { start: Date.now(), cwd: cwdOf(input), paths: [] };
       const e = effectsOf(input);
@@ -12960,13 +13099,18 @@ async function hook(agent, event) {
       s.paths = merge(s.paths, e.written).filter((p) => !e.removed.has(p) || e.written.has(p));
       if (e.dirs.size) s.dirs = merge(s.dirs, e.dirs);
       if (e.unknown.size) s.unknown = merge(s.unknown, e.unknown).slice(0, 10);
-      if (e.outside && !s.outsideSince) s.outsideSince = s.turnAt ?? s.start;
+      if (e.outside.size) {
+        s.outsideDirs = merge(s.outsideDirs, e.outside);
+        s.outsideSince ||= s.turnAt ?? s.start;
+      }
+      if (e.ran) s.scriptSince ||= s.turnAt ?? s.start;
+      s.lastPost = Date.now();
       store(f, s);
     } else if (event === "stop") {
       const s = load(f) || { start: Date.now() - 6e5, paths: [] };
       const cwd = s.cwd || cwdOf(input);
       const { lines, urgent, failed, pending, handled } = await runStop(s, cwd);
-      store(f, pending.length ? { ...s, cwd, paths: pending, unknown: [], done: { ...s.done, ...handled } } : { start: Date.now(), turnAt: s.turnAt, cwd, paths: [], done: handled });
+      store(f, pending.length ? { ...s, cwd, open: false, gaps: [], paths: pending, unknown: [], done: { ...s.done, ...handled } } : { start: Date.now(), turnAt: s.turnAt, cwd, open: false, paths: [], done: handled });
       if (lines.length) note(lines.join(" / "));
       if (lines.length) {
         const message = "html-doc-kit: " + lines.join("\n");
