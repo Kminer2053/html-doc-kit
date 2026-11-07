@@ -14,6 +14,12 @@
 | 훅 안에서 Chrome 실행 | 미확인 | 미확인 | 미확인 |
 | IDE·데스크톱 앱 | 자동 시험 불가, 직접 확인 필요 | 자동 시험 불가, 직접 확인 필요 | 자동 시험 불가, 직접 확인 필요 |
 
+## 2026-11-08 추가 실측
+
+- Codex: 사용자가 대화형 `codex`에서 훅 세 개를 신뢰한 뒤 `~/.codex/config.toml`에 `hooks.state."/Users/<사용자>/.codex/hooks.json:<이벤트>:0:0"` 형식으로 기록됐다. 이후 `codex exec`에서 prompt·post·stop 훅이 돌았고, 스킬 없이 셸로 쓴 HTML에 Stop 훅이 키트를 넣었다.
+- Claude Code: `claude -p`에서 스킬·훅이 돌고 낮은 모델 시험 11건이 통과했다.
+- Cursor CLI: `agent -p`에서는 사용자 훅이 돌지 않는다. 프로젝트 훅은 `--trust` 뒤 `afterFileEdit`만 돈다. 새 폴더마다 신뢰를 묻고, 답하지 않으면 아무 일도 하지 않는다.
+
 ## 설계에 반영할 것
 
 - **Codex 훅은 사용자 승인이 있어야 돈다.** 프로젝트 `.codex/hooks.json`도, `-c`로 넣은 훅도 실행되지 않았다. `~/.codex/config.toml`의 `hooks.state`에 훅별 `trusted_hash`가 기록되는 구조로 보인다. 설치 프로그램이 신뢰를 대신 쓰지 않고, 사용자가 처음 한 번 승인하게 안내한다. `doctor`는 승인 여부를 점검해야 한다. 승인 경로는 아직 직접 확인하지 않았다.
