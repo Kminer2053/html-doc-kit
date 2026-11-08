@@ -1,5 +1,5 @@
 // C6 브라우저 시험. Chrome을 임시 프로필로 띄워 DevTools로 조작한다. 띄울 수 없으면 "미실행"으로 보고한다
-import {spawn} from 'node:child_process';
+import {spawn, spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -30,7 +30,27 @@ export function findChrome() {
   return list.find((p) => p && fs.existsSync(p)) || null;
 }
 
+// 예전에 지우지 못한 임시 프로필을 치운다. 한 시간 넘게 지났고 Chrome 프로필 모양인 doc-kit-* 폴더만 지운다
+export function sweepProfiles({dir = os.tmpdir(), now = Date.now()} = {}) {
+  let list = [];
+  try {
+    list = fs.readdirSync(dir, {withFileTypes: true});
+  } catch {
+    return;
+  }
+  for (const d of list) {
+    if (!d.isDirectory() || !d.name.startsWith('doc-kit-')) continue;
+    const f = path.join(dir, d.name);
+    try {
+      if (now - fs.statSync(f).mtimeMs < 3600000) continue;
+      const chromeMade = fs.existsSync(path.join(f, 'Local State')) || fs.existsSync(path.join(f, 'DevToolsActivePort')) || fs.statSync(path.join(f, 'Default'), {throwIfNoEntry: false})?.isDirectory();
+      if (chromeMade) fs.rmSync(f, {recursive: true, force: true});
+    } catch {}
+  }
+}
+
 async function openChrome(chrome) {
+  sweepProfiles();
   const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'doc-kit-'));
   const proc = spawn(chrome, ['--headless=new', `--user-data-dir=${profile}`, '--no-first-run', '--disable-gpu', '--hide-scrollbars', '--remote-debugging-port=0', '--window-size=1440,900', 'about:blank'], {stdio: 'ignore'});
   proc.unref(); // Chrome이 끝나지 않아도 명령은 끝난다
@@ -38,15 +58,41 @@ async function openChrome(chrome) {
   proc.on('error', (e) => {
     failed = e;
   });
-  const close = async () => {
+  let sock = null;
+  const wait = async (ms) => {
     const exited = new Promise((r) => proc.once('exit', r));
-    if (proc.exitCode === null && !failed) {
-      proc.kill();
-      const limit = deadline(4000, 'late');
-      if ((await Promise.race([exited, limit.done])) === 'late') proc.kill('SIGKILL');
-      limit.cancel();
+    if (proc.exitCode !== null || proc.signalCode !== null) return true;
+    const limit = deadline(ms, 'late');
+    const r = await Promise.race([exited, limit.done]);
+    limit.cancel();
+    return r !== 'late';
+  };
+  // 먼저 Chrome에게 스스로 닫으라고 한다. 자식 프로세스까지 끝나야 Windows에서 프로필 파일이 풀린다
+  const close = async () => {
+    if (proc.exitCode === null && proc.signalCode === null && !failed) {
+      let asked = false;
+      if (sock && sock.readyState === 1) {
+        try {
+          sock.send(JSON.stringify({id: 0x7fffffff, method: 'Browser.close'}));
+          asked = true;
+        } catch {}
+      }
+      if (!asked || !(await wait(3000))) {
+        // Windows에서는 kill이 본 프로세스만 끝낸다. 자식까지 함께 끝낸다
+        if (process.platform === 'win32') spawnSync('taskkill', ['/pid', String(proc.pid), '/T', '/F'], {stdio: 'ignore', windowsHide: true});
+        else proc.kill();
+        if (!(await wait(4000))) proc.kill('SIGKILL');
+      }
     }
-    fs.rmSync(profile, {recursive: true, force: true, maxRetries: 10, retryDelay: 200});
+    // 지우지 못하면 잠깐 뒤 다시 해 본다. 그래도 남으면 다음 실행의 정리에 맡긴다
+    for (let i = 0; i < 3; i++) {
+      try {
+        fs.rmSync(profile, {recursive: true, force: true, maxRetries: 5, retryDelay: 200});
+        return;
+      } catch {
+        await sleep(500);
+      }
+    }
   };
   try {
     let port = null;
@@ -65,6 +111,7 @@ async function openChrome(chrome) {
       ws.onopen = r;
       ws.onerror = () => j(new Error('DevTools 연결 실패'));
     });
+    sock = ws;
     let seq = 0;
     const pending = new Map();
     const errors = [];
@@ -111,8 +158,8 @@ async function openChrome(chrome) {
     };
     return {send, ev, nav, errors, close: async () => {
       closed = true;
-      ws.close();
       await close();
+      ws.close();
     }};
   } catch (e) {
     await close();

@@ -99,7 +99,13 @@ for (const [name, file, pages] of [['custom', f3, 2], ['a4', f2, 2]]) {
   await b.send('Emulation.setEmulatedMedia', {media: ''});
   const out = path.join(OUT, name + '.pdf');
   fs.writeFileSync(out, Buffer.from(pdf.data, 'base64'));
-  const info = spawnSync('pdfinfo', ['-l', '2', out], {encoding: 'utf-8'}).stdout || '';
+  const pi = spawnSync('pdfinfo', ['-l', '2', out], {encoding: 'utf-8'});
+  // 도구가 없으면(Windows 등) 이 검사는 건너뛴다
+  if (pi.error || pi.status === null) {
+    console.log(`SKIP 인쇄 ${name}: pdfinfo 없음`);
+    continue;
+  }
+  const info = pi.stdout || '';
   const n = /Pages:\s+(\d+)/.exec(info);
   ok(`인쇄 ${name}: ${pages}쪽`, n && Number(n[1]) === pages, info.split('\n').filter((l) => /Pages|size/.test(l)).join(' / '));
 }
@@ -226,7 +232,9 @@ const inkOf = async (printBackground) => {
   await b.send('Emulation.setEmulatedMedia', {media: ''});
   const file = path.join(OUT, `print_${printBackground}.pdf`);
   fs.writeFileSync(file, Buffer.from(pdf.data, 'base64'));
-  const ppm = spawnSync('pdftoppm', ['-r', '40', '-f', '1', '-l', '1', file], {maxBuffer: 1e8}).stdout;
+  const pt = spawnSync('pdftoppm', ['-r', '40', '-f', '1', '-l', '1', file], {maxBuffer: 1e8});
+  if (pt.error || pt.status === null) return null; // pdftoppm 없음
+  const ppm = pt.stdout;
   // P6 머리 세 줄(형식, 가로 세로, 최댓값)을 건너뛰고 색이 있는 점을 센다
   let at = 0;
   for (let n = 0; n < 3; n++) at = ppm.indexOf(10, at) + 1;
@@ -236,7 +244,8 @@ const inkOf = async (printBackground) => {
 };
 const inkOff = await inkOf(false);
 const inkOn = await inkOf(true);
-ok('57 배경 그래픽을 꺼도 배경이 켠 것과 같게 찍힘', inkOff > 2000 && Math.abs(inkOff - inkOn) <= inkOn * 0.01, `${inkOff} / ${inkOn}`);
+if (inkOff === null || inkOn === null) console.log('SKIP 57 배경 그래픽을 꺼도 배경이 켠 것과 같게 찍힘: pdftoppm 없음');
+else ok('57 배경 그래픽을 꺼도 배경이 켠 것과 같게 찍힘', inkOff > 2000 && Math.abs(inkOff - inkOn) <= inkOn * 0.01, `${inkOff} / ${inkOn}`);
 
 // 59: 그림 옮기기·바꾸기 되돌리기
 const svgA = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="200" height="120"><rect width="200" height="120" fill="#1b5790"/></svg>');

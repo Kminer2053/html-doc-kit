@@ -4,8 +4,10 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {pathToFileURL} from 'node:url';
+import {findChrome} from '../../src/cli/browser.mjs';
 
-const CHROME = process.env.DOC_KIT_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+// DOC_KIT_CHROME을 먼저 보고, 없으면 운영체제별 기본 위치에서 찾는다
+const CHROME = findChrome() || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 // 배경 탭으로 취급돼 타이머·화면 그리기가 멈추지 않게 하는 실행 인자
 export const BG_FLAGS = ['--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'];

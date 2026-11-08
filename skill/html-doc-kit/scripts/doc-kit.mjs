@@ -11,7 +11,7 @@ import os2 from "node:os";
 import path3 from "node:path";
 
 // src/cli/browser.mjs
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import fs2 from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -9836,7 +9836,26 @@ function findChrome() {
   ];
   return list.find((p) => p && fs2.existsSync(p)) || null;
 }
+function sweepProfiles({ dir = os.tmpdir(), now = Date.now() } = {}) {
+  let list = [];
+  try {
+    list = fs2.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const d of list) {
+    if (!d.isDirectory() || !d.name.startsWith("doc-kit-")) continue;
+    const f = path.join(dir, d.name);
+    try {
+      if (now - fs2.statSync(f).mtimeMs < 36e5) continue;
+      const chromeMade = fs2.existsSync(path.join(f, "Local State")) || fs2.existsSync(path.join(f, "DevToolsActivePort")) || fs2.statSync(path.join(f, "Default"), { throwIfNoEntry: false })?.isDirectory();
+      if (chromeMade) fs2.rmSync(f, { recursive: true, force: true });
+    } catch {
+    }
+  }
+}
 async function openChrome(chrome) {
+  sweepProfiles();
   const profile = fs2.mkdtempSync(path.join(os.tmpdir(), "doc-kit-"));
   const proc = spawn(chrome, ["--headless=new", `--user-data-dir=${profile}`, "--no-first-run", "--disable-gpu", "--hide-scrollbars", "--remote-debugging-port=0", "--window-size=1440,900", "about:blank"], { stdio: "ignore" });
   proc.unref();
@@ -9844,15 +9863,39 @@ async function openChrome(chrome) {
   proc.on("error", (e) => {
     failed = e;
   });
+  let sock = null;
+  const wait = async (ms) => {
+    const exited = new Promise((r2) => proc.once("exit", r2));
+    if (proc.exitCode !== null || proc.signalCode !== null) return true;
+    const limit = deadline(ms, "late");
+    const r = await Promise.race([exited, limit.done]);
+    limit.cancel();
+    return r !== "late";
+  };
   const close = async () => {
-    const exited = new Promise((r) => proc.once("exit", r));
-    if (proc.exitCode === null && !failed) {
-      proc.kill();
-      const limit = deadline(4e3, "late");
-      if (await Promise.race([exited, limit.done]) === "late") proc.kill("SIGKILL");
-      limit.cancel();
+    if (proc.exitCode === null && proc.signalCode === null && !failed) {
+      let asked = false;
+      if (sock && sock.readyState === 1) {
+        try {
+          sock.send(JSON.stringify({ id: 2147483647, method: "Browser.close" }));
+          asked = true;
+        } catch {
+        }
+      }
+      if (!asked || !await wait(3e3)) {
+        if (process.platform === "win32") spawnSync("taskkill", ["/pid", String(proc.pid), "/T", "/F"], { stdio: "ignore", windowsHide: true });
+        else proc.kill();
+        if (!await wait(4e3)) proc.kill("SIGKILL");
+      }
     }
-    fs2.rmSync(profile, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    for (let i = 0; i < 3; i++) {
+      try {
+        fs2.rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+        return;
+      } catch {
+        await sleep(500);
+      }
+    }
   };
   try {
     let port = null;
@@ -9871,6 +9914,7 @@ async function openChrome(chrome) {
       ws.onopen = r;
       ws.onerror = () => j2(new Error("DevTools \uC5F0\uACB0 \uC2E4\uD328"));
     });
+    sock = ws;
     let seq = 0;
     const pending = /* @__PURE__ */ new Map();
     const errors = [];
@@ -9917,8 +9961,8 @@ async function openChrome(chrome) {
     };
     return { send, ev, nav, errors, close: async () => {
       closed = true;
-      ws.close();
       await close();
+      ws.close();
     } };
   } catch (e) {
     await close();
@@ -12267,6 +12311,7 @@ async function upgrade(file, opts = {}) {
 }
 
 // src/cli/install.mjs
+import { spawnSync as spawnSync2 } from "node:child_process";
 import fs5 from "node:fs";
 import os3 from "node:os";
 import path4 from "node:path";
@@ -12297,6 +12342,56 @@ var samePath2 = (a3, b) => {
   };
   return real(a3) === real(b);
 };
+var envGet = (env, k) => env[Object.keys(env).find((x2) => x2.toUpperCase() === k)];
+function probeNode(file) {
+  const r = spawnSync2(file, ["--version"], { encoding: "utf-8", timeout: 1e4, windowsHide: true });
+  return r.status === 0 ? Number(/^v(\d+)\./.exec(String(r.stdout).trim())?.[1]) : NaN;
+}
+function findNode(pathStr, { platform, env, execPath, probe }) {
+  const sep = platform === "win32" ? ";" : ":";
+  const exts = platform === "win32" ? (envGet(env, "PATHEXT") || ".COM;.EXE;.BAT;.CMD").split(";").filter(Boolean) : [""];
+  for (const dir of (pathStr || "").split(sep).filter(Boolean)) {
+    const hit = exts.map((x2) => path4.join(dir.replace(/^"|"$/g, ""), "node" + x2.toLowerCase())).find((f) => fs5.existsSync(f) && fs5.statSync(f).isFile());
+    if (!hit) continue;
+    if (platform === "win32" && !hit.endsWith(".exe")) return null;
+    if (samePath2(hit, execPath)) return hit;
+    return probe(hit) >= 22 ? hit : null;
+  }
+  return null;
+}
+function parseRegPath(out) {
+  return /^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im.exec(String(out || ""))?.[1].trim() ?? null;
+}
+var readRegPath = (key) => {
+  const target = key.startsWith("HKLM") ? "Machine" : "User";
+  const script = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $v=[Environment]::GetEnvironmentVariable('Path','${target}'); if ($null -eq $v) { exit 3 }; [Console]::Out.Write($v)`;
+  const ps = spawnSync2("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(script, "utf16le").toString("base64")], { encoding: "utf-8", timeout: 15e3, windowsHide: true });
+  if (ps.status === 0) return ps.stdout.trim();
+  const r = spawnSync2("reg", ["query", key, "/v", "Path"], { encoding: "utf-8", timeout: 1e4, windowsHide: true });
+  return r.status === 0 ? parseRegPath(r.stdout) : null;
+};
+function persistentPath({ env = process.env, readReg = readRegPath } = {}) {
+  const sys = readReg("HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment");
+  if (sys == null) return null;
+  const user = readReg("HKCU\\Environment") || "";
+  const expand = (s) => s.replace(/%([^%;]+)%/g, (m, k) => envGet(env, k.toUpperCase()) ?? m);
+  return [sys, user].filter(Boolean).map(expand).join(";");
+}
+function pathNode({ platform = process.platform, env = process.env, execPath = process.execPath, probe = probeNode, readReg } = {}) {
+  const o2 = { platform, env, execPath, probe };
+  if (platform !== "win32") return findNode(envGet(env, "PATH"), o2);
+  const persist = persistentPath({ env, readReg });
+  const hit = persist == null ? null : findNode(persist, o2);
+  if (!hit) return null;
+  const fnm = envGet(env, "FNM_MULTISHELL_PATH");
+  const rel = fnm ? path4.relative(fnm, hit) : "..";
+  if (!rel.startsWith("..") && !path4.isAbsolute(rel)) return null;
+  return findNode(envGet(env, "PATH"), o2) ? hit : null;
+}
+function nodeToken({ platform = process.platform, env = process.env, execPath = process.execPath, probe, readReg } = {}) {
+  if (platform === "win32" && pathNode({ platform, env, execPath, probe, readReg })) return "node";
+  return `"${execPath}"`;
+}
 var isSkill = (d) => fs5.existsSync(path4.join(d, "SKILL.md")) && fs5.existsSync(path4.join(d, "scripts", "doc-kit.mjs"));
 var readJson2 = (f, fallback) => {
   try {
@@ -12394,20 +12489,20 @@ function copySkill(src, to) {
   fs5.rmSync(to, { recursive: true, force: true });
   fs5.renameSync(tmp, to);
 }
-function install({ home = os3.homedir(), agents = ALL_AGENTS } = {}) {
+function install({ home = os3.homedir(), agents = ALL_AGENTS, platform = process.platform, env = process.env, probe, readReg } = {}) {
   checkAgents(agents);
   const p = paths(home);
   const src = findSource(p);
-  const node = process.execPath;
+  const node = nodeToken({ platform, env, probe, readReg });
   fs5.mkdirSync(path4.dirname(p.bin), { recursive: true });
   if (!samePath2(path4.join(src, "scripts", "doc-kit.mjs"), p.bin)) fs5.copyFileSync(path4.join(src, "scripts", "doc-kit.mjs"), p.bin);
-  const cmd2 = (a3, e) => `"${node}" "${p.bin}" hook ${a3} ${e}`;
+  const cmd2 = (a3, e) => `${node} "${p.bin}" hook ${a3} ${e}`;
   const done = [];
   if (agents.includes("claude")) {
     copySkill(src, p.claudeSkill);
     const c2 = readJson2(p.claudeSettings, {});
     mergeNested(c2, "UserPromptSubmit", nestedHook(cmd2("claude", "prompt")));
-    mergeNested(c2, "PostToolUse", nestedHook(cmd2("claude", "post"), "Write|Edit|MultiEdit|Bash"));
+    mergeNested(c2, "PostToolUse", nestedHook(cmd2("claude", "post"), "Write|Edit|MultiEdit|Bash|PowerShell"));
     mergeNested(c2, "Stop", nestedHook(cmd2("claude", "stop")));
     writeJson2(p.claudeSettings, c2);
     upsertBlock(p.claudeMd, rules(p.bin));
@@ -12469,7 +12564,17 @@ function uninstall({ home = os3.homedir(), agents = ALL_AGENTS } = {}) {
 }
 var CODEX_EVENTS = { prompt: "user_prompt_submit", post: "post_tool_use", stop: "stop" };
 var codexTrusted = (conf, event) => new RegExp(`\\[hooks\\.state\\."[^"]*\\.codex/hooks\\.json:${event}:[^"]*"\\]\\s*\\n\\s*trusted_hash`, "i").test(conf);
-function doctor({ home = os3.homedir(), agents } = {}) {
+var ourCommands = (hooks) => Object.values(hooks).flatMap((l) => Array.isArray(l) ? l : []).flatMap((h) => [h?.command, ...Array.isArray(h?.hooks) ? h.hooks.map((x2) => x2?.command) : []]).filter(isOurCommand);
+function smoke(prefix, env, persist) {
+  const want = (r) => r.status === 0 && r.stdout.trim() === VERSION;
+  const line = `${prefix} --version`;
+  const base = Object.fromEntries(Object.entries(env).filter(([k]) => k.toUpperCase() !== "PATH"));
+  const opts = { encoding: "utf-8", timeout: 3e4, windowsHide: true, env: persist == null ? env : { ...base, Path: persist } };
+  const cmd2 = spawnSync2(line, { ...opts, shell: true });
+  const ps = spawnSync2("powershell.exe", ["-NoProfile", "-NonInteractive", "-EncodedCommand", Buffer.from(line, "utf16le").toString("base64")], opts);
+  return [["cmd.exe", want(cmd2)], ["PowerShell", want(ps)]];
+}
+function doctor({ home = os3.homedir(), agents, platform = process.platform, env = process.env, probe, readReg } = {}) {
   if (agents) checkAgents(agents);
   const p = paths(home);
   const lines = [];
@@ -12485,18 +12590,25 @@ function doctor({ home = os3.homedir(), agents } = {}) {
   };
   const traced = ALL_AGENTS.filter((a3) => isInstalled(p, a3) || hasRules(a3));
   const targets = agents || (traced.length ? traced : ALL_AGENTS);
-  const nodeOk = (f) => {
-    const m = /"([^"]+)" "[^"]*doc-kit\.mjs"/.exec(fs5.existsSync(f) ? fs5.readFileSync(f, "utf-8").replace(/\\"/g, '"') : "");
-    return !m || fs5.existsSync(m[1]);
-  };
+  const nodeOk = (cmds) => cmds.every((c2) => {
+    const m = /^"([^"]+)"/.exec(c2);
+    if (m) return fs5.existsSync(m[1]);
+    return !/^node\s/.test(c2) || !!pathNode({ platform, env, probe, readReg });
+  });
   for (const a3 of targets) {
     const f = hookFile(p, a3);
     say(isSkill(skillDir(p, a3)), `${AGENT_NAMES[a3]} \uC2A4\uD0AC ${skillDir(p, a3)}`);
     const hooks = hooksOf(p, a3);
     const missing = HOOK_EVENTS[a3].filter((e) => !hasOurs(hooks[e]));
-    const lost = nodeOk(f) ? "" : ", Node \uACBD\uB85C \uC5C6\uC74C";
+    const lost = nodeOk(ourCommands(hooks)) ? "" : ", Node \uACBD\uB85C \uC5C6\uC74C";
     say(!missing.length && !lost, `${AGENT_NAMES[a3]} \uD6C5 ${f}${missing.length ? ` (\uC5C6\uC74C: ${missing.join(", ")})` : ""}${lost}`);
     say(hasRules(a3), `${AGENT_NAMES[a3]} \uC9C0\uCE68 ${instructionFile(p, a3)}`);
+  }
+  if (platform === "win32") {
+    const cmds = targets.flatMap((a3) => ourCommands(hooksOf(p, a3)));
+    if (cmds.some((c2) => c2.startsWith('"'))) say(null, "\uC601\uAD6C PATH(\uC2DC\uC2A4\uD15C\xB7\uC0AC\uC6A9\uC790 \uD658\uACBD \uBCC0\uC218)\uC5D0\uC11C Node 22 \uC774\uC0C1\uC758 node.exe\uB97C \uCC3E\uC9C0 \uBABB\uD574 \uD6C5 \uBA85\uB839\uC774 \uB530\uC634\uD45C \uACBD\uB85C\uB85C \uC2DC\uC791\uD569\uB2C8\uB2E4. PowerShell\uB85C \uD6C5\uC744 \uB3CC\uB9AC\uB294 \uC5D0\uC774\uC804\uD2B8\uC5D0\uC11C\uB294 \uD6C5\uC774 \uC2E4\uD328\uD560 \uC218 \uC788\uC2B5\uB2C8\uB2E4. \uD658\uACBD \uBCC0\uC218 Path\uC5D0 node\uB97C \uB123\uACE0 install\uC744 \uB2E4\uC2DC \uC2E4\uD589\uD558\uC138\uC694");
+    const prefix = cmds.map((c2) => /^.*?doc-kit\.mjs"/.exec(c2)?.[0]).find(Boolean);
+    if (prefix && fs5.existsSync(p.bin)) for (const [shell, ok] of smoke(prefix, env, persistentPath({ env, readReg }))) say(ok, `\uD6C5 \uBA85\uB839 \uC2DC\uD5D8(${shell}): ${prefix}`);
   }
   if (targets.includes("codex")) {
     const conf = fs5.existsSync(p.codexConfig) ? fs5.readFileSync(p.codexConfig, "utf-8") : "";
@@ -12507,7 +12619,7 @@ function doctor({ home = os3.homedir(), agents } = {}) {
 }
 
 // src/cli/hook.mjs
-import { spawnSync } from "node:child_process";
+import { spawnSync as spawnSync3 } from "node:child_process";
 import crypto4 from "node:crypto";
 import fs6 from "node:fs";
 import os4 from "node:os";
@@ -12777,6 +12889,14 @@ function htmlTree(root) {
   walkDir(root, "", 0);
   return { rels: out, cut };
 }
+function fromMsys(s, { platform = process.platform, tmp = os4.tmpdir() } = {}) {
+  if (platform !== "win32" || typeof s !== "string") return s;
+  const d = /^\/([A-Za-z])(?=\/|$)(.*)$/s.exec(s);
+  if (d) return path5.win32.normalize(`${d[1].toUpperCase()}:\\${d[2]}`);
+  const t = /^\/tmp(?=\/|$)(.*)$/s.exec(s);
+  if (t) return path5.win32.join(tmp, t[1]);
+  return s;
+}
 function readShell(cmd2, cwd) {
   const home = HOME();
   const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), maybe: /* @__PURE__ */ new Set(), notes: /* @__PURE__ */ new Set(), ran: false, wrote: false };
@@ -12789,7 +12909,10 @@ function readShell(cmd2, cwd) {
     if (!unresolved) s = s.replace(/^~(?=\/|$)/, home);
     return { s, unresolved };
   };
-  const abs = (s) => path5.isAbsolute(s) ? path5.normalize(s) : dir ? path5.resolve(dir, s) : null;
+  const abs = (raw) => {
+    const s = fromMsys(raw);
+    return path5.isAbsolute(s) ? path5.normalize(s) : dir ? path5.resolve(dir, s) : null;
+  };
   const addFile = (w2) => {
     const { s, unresolved } = expand(w2);
     if (!isHtml(s)) return;
@@ -12936,13 +13059,351 @@ function readShell(cmd2, cwd) {
   }
   return out;
 }
+var PS_SEP = "";
+var PS_UNRES = "";
+function psCommands(src) {
+  const cmds = [];
+  let cur = [];
+  let word = null;
+  const flush = () => {
+    if (word !== null) cur.push(word);
+    word = null;
+  };
+  const end = () => {
+    flush();
+    if (cur.length) cmds.push(cur);
+    cur = [];
+  };
+  const close = (i) => {
+    let depth = 0;
+    for (let j2 = i; j2 < src.length; j2++) {
+      const c2 = src[j2];
+      if (c2 === "'") j2 = src.indexOf("'", j2 + 1) < 0 ? src.length : src.indexOf("'", j2 + 1);
+      else if (c2 === '"') {
+        for (j2++; j2 < src.length && src[j2] !== '"'; j2++) if (src[j2] === "`") j2++;
+      } else if (c2 === "`") j2++;
+      else if (c2 === "(") depth++;
+      else if (c2 === ")" && --depth === 0) return j2;
+    }
+    return src.length;
+  };
+  for (let i = 0; i < src.length; i++) {
+    const c2 = src[i];
+    if (c2 === "@" && (src[i + 1] === "'" || src[i + 1] === '"') && /^[ \t]*\r?\n/.test(src.slice(i + 2, i + 40))) {
+      const q2 = src[i + 1];
+      const nl = src.indexOf("\n", i + 2);
+      const stop = src.indexOf(`
+${q2}@`, nl);
+      const body = src.slice(nl + 1, stop < 0 ? src.length : stop).replace(/\r$/, "");
+      word = (word ?? "") + (q2 === "'" ? body.replaceAll("$", LITERAL_DOLLAR) : body);
+      i = stop < 0 ? src.length : stop + 2;
+    } else if (c2 === "'") {
+      let s = "";
+      for (i++; i < src.length; i++) {
+        if (src[i] !== "'") s += src[i];
+        else if (src[i + 1] === "'") s += "'", i++;
+        else break;
+      }
+      word = (word ?? "") + s.replaceAll("$", LITERAL_DOLLAR);
+    } else if (c2 === '"') {
+      let s = "";
+      for (i++; i < src.length; i++) {
+        if (src[i] === "`") {
+          i++;
+          s += src[i] === "$" ? LITERAL_DOLLAR : src[i] ?? "";
+        } else if (src[i] === '"') {
+          if (src[i + 1] !== '"') break;
+          s += '"';
+          i++;
+        } else if (src[i] === "$" && src[i + 1] === "(") {
+          const j2 = close(i + 1);
+          s += PS_UNRES + src.slice(i, j2 + 1);
+          i = j2;
+        } else s += src[i];
+      }
+      word = (word ?? "") + s;
+    } else if (c2 === "`") {
+      i++;
+      if (src[i] === "\r" && src[i + 1] === "\n") i++;
+      if (src[i] !== "\n") word = (word ?? "") + (src[i] === "$" ? LITERAL_DOLLAR : src[i] ?? "");
+    } else if (c2 === "\n" || c2 === ";" || c2 === "|" || c2 === "{" || c2 === "}") end();
+    else if (c2 === " " || c2 === "	" || c2 === "\r") flush();
+    else if (c2 === ",") {
+      if (word === null && typeof cur.at(-1) === "string") word = cur.pop();
+      word = (word ?? "") + PS_SEP;
+      while (/[ \t]/.test(src[i + 1] || "")) i++;
+    } else if (c2 === "&") {
+      if (src[i + 1] === "&") end(), i++;
+      else flush();
+    } else if (c2 === ">") {
+      if (word !== null && /^[\d*]$/.test(word)) word = null;
+      flush();
+      if (src[i + 1] === ">") i++;
+      if (src[i + 1] === "&") {
+        i++;
+        while (/\d/.test(src[i + 1] || "")) i++;
+      } else cur.push(REDIR);
+    } else if (c2 === "<" && src[i + 1] === "#") {
+      const j2 = src.indexOf("#>", i + 2);
+      i = j2 < 0 ? src.length : j2 + 1;
+    } else if (c2 === "#" && word === null) {
+      const nl = src.indexOf("\n", i);
+      i = (nl < 0 ? src.length : nl) - 1;
+    } else if ((c2 === "$" || c2 === "@") && src[i + 1] === "(") {
+      const j2 = close(i + 1);
+      cmds.push(...psCommands(src.slice(i + 2, j2)));
+      word = (word ?? "") + PS_UNRES + src.slice(i, j2 + 1);
+      i = j2;
+    } else if (c2 === "$" && src[i + 1] === "{") {
+      const j2 = src.indexOf("}", i);
+      word = (word ?? "") + src.slice(i, j2 < 0 ? src.length : j2 + 1);
+      i = j2 < 0 ? src.length : j2;
+    } else if (c2 === "@" && src[i + 1] === "{") continue;
+    else if (c2 === "(") {
+      const j2 = close(i);
+      const inner2 = src.slice(i + 1, j2);
+      if (word === null) {
+        cmds.push(...psCommands(inner2));
+        word = PS_UNRES + src.slice(i, j2 + 1);
+      } else {
+        flush();
+        cur.call = true;
+        const parts = psCommands(inner2);
+        const args = parts.pop() || [];
+        cmds.push(...parts);
+        cur.push(...args.filter((w2) => typeof w2 === "string").flatMap((w2) => w2.split(PS_SEP)).filter(Boolean));
+      }
+      i = j2;
+    } else word = (word ?? "") + c2;
+  }
+  end();
+  return cmds;
+}
+var PS_READ = /* @__PURE__ */ new Set(["get-content", "gc", "cat", "type", "get-childitem", "gci", "ls", "dir", "select-string", "sls", "test-path", "get-item", "gi", "write-output", "echo", "write", "write-host", "resolve-path", "rvpa", "get-location", "gl", "pwd", "get-date", "get-command", "gcm", "get-help", "help", "measure-object", "measure", "select-object", "select", "where-object", "where", "?", "foreach-object", "foreach", "%", "sort-object", "sort", "format-table", "ft", "format-list", "fl", "out-string", "out-host", "out-null", "convertto-json", "convertfrom-json", "convertto-html", "get-process", "get-filehash", "get-itemproperty", "join-path", "split-path", "write-verbose", "write-warning", "write-error", "get-variable", "get-member", "gm", "compare-object", "group-object", "start-sleep", "sleep"]);
+var PS_KEYWORDS = /* @__PURE__ */ new Set(["if", "elseif", "else", "foreach", "for", "while", "do", "until", "try", "catch", "finally", "switch", "function", "filter", "param", "begin", "process", "end", "return", "throw", "break", "continue", "trap", "exit", "."]);
+var PS_WRITE = /* @__PURE__ */ new Set(["set-content", "sc", "add-content", "ac", "out-file", "tee-object", "tee", "new-item", "ni"]);
+var PS_COPY = /* @__PURE__ */ new Set(["copy-item", "copy", "cp", "cpi"]);
+var PS_MOVE = /* @__PURE__ */ new Set(["move-item", "move", "mv", "mi"]);
+var PS_REMOVE = /* @__PURE__ */ new Set(["remove-item", "del", "rm", "ri", "erase", "rd", "rmdir"]);
+var PS_CD = /* @__PURE__ */ new Set(["set-location", "cd", "sl", "chdir", "push-location", "pushd"]);
+var PS_PATHS = ["path", "literalpath", "pspath", "lp", "filepath"];
+var PS_SWITCH = ["force", "nonewline", "passthru", "whatif", "confirm", "asbytestream", "append", "noclobber", "recurse", "container", "verbose", "debug"];
+var PS_VALUE = [...PS_PATHS, "destination", "name", "value", "encoding", "itemtype", "type", "include", "exclude", "filter", "credential", "stream", "width", "inputobject", "variable", "delimiter", "target", "erroraction"];
+var isPsCmdlet = (w2) => /^[a-z]+-[a-z]+$/i.test(w2);
+var PS_READ_VERBS = /* @__PURE__ */ new Set(["get", "test", "find", "show", "measure", "select", "format", "resolve", "compare", "convertfrom", "read", "search", "wait"]);
+var PS_READ_WRITES = /* @__PURE__ */ new Set(["write-host", "write-output", "write-verbose", "write-information", "write-debug", "write-progress", "write-warning", "write-error"]);
+var PS_OUT_PARAMS = ["outfile", "outputfile", "outpath", "outputpath", "filepath", "destination"];
+var PS_NET_WRITE = /^\[(?:System\.)?IO\.(?:File\]::(?:WriteAllText|WriteAllLines|WriteAllBytes|AppendAllText|AppendAllLines|Create|CreateText|OpenWrite)|StreamWriter\]::new)$/i;
+var PS_STREAMWRITER = /^(?:System\.)?IO\.StreamWriter$/i;
+var psLike = (w2) => isPsCmdlet(w2) || [PS_READ, PS_WRITE, PS_COPY, PS_MOVE, PS_REMOVE, PS_CD].some((set) => set.has(w2.toLowerCase()));
+var looksPowerShell = (cmd2) => /(?:^|[\s;|({])(?:Set-Content|Add-Content|Out-File|New-Item|Copy-Item|Move-Item|Remove-Item|Tee-Object|Set-Location)\b|\$env:|\[(?:System\.)?IO\.(?:File|StreamWriter)\]::|New-Object\s+(?:-TypeName\s+)?(?:System\.)?IO\.StreamWriter\b/i.test(cmd2) || // 별칭은 명령 자리에 온 낱말만 본다
+/(?:^|[\n;|&({])[ \t]*(?:sc|ni|ac)[ \t]+\S/i.test(cmd2);
+function readPowerShell(cmd2, cwd) {
+  const home = HOME();
+  const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), maybe: /* @__PURE__ */ new Set(), notes: /* @__PURE__ */ new Set(), ran: false, wrote: false };
+  const vars = {};
+  let dir = cwd;
+  const lookup = (name) => {
+    const n = name.toLowerCase();
+    if (Object.hasOwn(vars, n)) return vars[n];
+    if (n === "home" || n === "env:userprofile" || n === "env:home") return home;
+    if (n === "env:temp" || n === "env:tmp") return os4.tmpdir();
+    if (n === "pwd" && dir) return dir;
+  };
+  const expand = (w2) => {
+    let s = w2.replace(/\$(?:\{([^}]+)\}|((?:env:)?\w+))/gi, (all, a3, b) => lookup(a3 ?? b) ?? all);
+    const unresolved = s.includes("$") || s.includes(PS_UNRES);
+    s = s.replaceAll(LITERAL_DOLLAR, "$").replaceAll(PS_UNRES, "").replace(/^(?:[\w.]+\\)?FileSystem::/i, "");
+    if (!unresolved) s = s.replace(/^~(?=[\\/]|$)/, home);
+    return { s, unresolved };
+  };
+  const abs = (s) => path5.isAbsolute(s) ? path5.normalize(s) : dir ? path5.resolve(dir, s) : null;
+  const vals = (w2) => typeof w2 === "string" ? w2.split(PS_SEP).filter(Boolean) : [];
+  const addFile = (w2) => {
+    const { s, unresolved } = expand(w2);
+    if (!isHtml(s) && !(unresolved && /\.html?\b/i.test(s))) return;
+    const p = unresolved ? null : abs(s);
+    if (p) out.written.add(p);
+    else out.unknown.add(s);
+  };
+  const addTarget = (w2) => {
+    const { s, unresolved } = expand(w2);
+    if (unresolved && !/\.html?\b/i.test(s) && path5.extname(s)) return;
+    addFile(w2);
+    if (unresolved && !/\.html?\b/i.test(s)) out.unknown.add(s);
+  };
+  const htmlWords = (a3) => {
+    for (const w2 of a3.flatMap(vals)) {
+      const { s, unresolved } = expand(w2.replace(/^-[A-Za-z][\w-]*:/, ""));
+      if (!isHtml(s)) continue;
+      if (unresolved || !abs(s)) out.unknown.add(s);
+      else out.maybe.add(abs(s));
+    }
+  };
+  const params = (a3) => {
+    const named = {};
+    const pos2 = [];
+    for (let i = 1; i < a3.length; i++) {
+      const m = /^-([A-Za-z][\w-]*)(?::(.*))?$/s.exec(a3[i]);
+      if (!m) {
+        pos2.push(a3[i]);
+        continue;
+      }
+      const n = m[1].toLowerCase();
+      if (m[2] !== void 0) named[n] = m[2];
+      else if (PS_SWITCH.some((s) => s.startsWith(n)) && !PS_VALUE.some((v) => v.startsWith(n))) named[n] = true;
+      else if (i + 1 < a3.length) named[n] = a3[++i];
+    }
+    const pick = (names) => names.map((n) => named[n]).find((v) => typeof v === "string");
+    return { named, pos: pos2, pick };
+  };
+  const run = (a3, call) => {
+    const asg = /^\$(\w+)(=(.*))?$/s.exec(a3[0]);
+    if (asg && (asg[2] !== void 0 || /^[-+*/]?=$/.test(a3[1] || ""))) {
+      const name2 = asg[1].toLowerCase();
+      const rest2 = asg[2] !== void 0 ? [asg[3], ...a3.slice(1)].filter((w2) => w2 !== "") : a3.slice(2);
+      vars[name2] = PS_UNRES + "$" + asg[1];
+      if (rest2.length === 1 && !psLike(rest2[0]) && !call && a3[1] !== "+=") {
+        const v = expand(rest2[0]);
+        if (!v.unresolved) vars[name2] = v.s;
+      } else if (/^join-path$/i.test(rest2[0] || "") && a3[1] !== "+=") {
+        const { pos: pos3, pick: pick2 } = params(rest2);
+        const parts = [pick2(["path"]) ?? pos3.shift(), pick2(["childpath"]) ?? pos3.shift()].map((w2) => typeof w2 === "string" && !w2.includes(PS_SEP) ? expand(w2) : null);
+        if (parts.every((v) => v && !v.unresolved)) vars[name2] = path5.join(parts[0].s, parts[1].s);
+      } else if (rest2.length) run(rest2, call);
+      return;
+    }
+    let k = 0;
+    while (k < a3.length && PS_KEYWORDS.has(a3[k].toLowerCase())) k++;
+    if (k) a3 = a3.slice(k).filter((w2, i) => i > 0 || !w2.startsWith(PS_UNRES));
+    if (!a3.length) return;
+    const name = a3[0].toLowerCase();
+    const { named, pos: pos2, pick } = params(a3);
+    if (PS_CD.has(name)) {
+      const w2 = pick(PS_PATHS) ?? pos2[0];
+      if (w2 === void 0) return;
+      const { s, unresolved } = expand(w2);
+      dir = unresolved || s === "-" ? null : abs(s);
+      return;
+    }
+    if (name === "pop-location" || name === "popd") {
+      dir = null;
+      return;
+    }
+    if (PS_READ.has(name)) return;
+    if (PS_NET_WRITE.test(a3[0]) || name === "new-object" && PS_STREAMWRITER.test(pick(["typename"]) ?? pos2[0] ?? "")) {
+      out.ran = true;
+      out.wrote = true;
+      const first = name === "new-object" ? typeof named.argumentlist === "string" ? named.argumentlist : pos2[named.typename === void 0 ? 1 : 0] : a3[1];
+      const w2 = vals(first)[0];
+      if (w2 === void 0) out.unknown.add(a3.slice(0, 2).join(" "));
+      else addTarget(w2);
+      return;
+    }
+    if (isPsCmdlet(name) && (PS_READ_VERBS.has(name.split("-")[0]) || PS_READ_WRITES.has(name)) && !PS_OUT_PARAMS.some((n) => n in named)) {
+      htmlWords(a3.slice(1));
+      return;
+    }
+    if (/^[$[@\d]|^\u0003/.test(a3[0])) {
+      if (call) out.ran = true, htmlWords(a3);
+      return;
+    }
+    if (PS_WRITE.has(name)) {
+      out.ran = true;
+      out.wrote = true;
+      const target = pick(PS_PATHS) ?? pos2[0];
+      if ((name === "new-item" || name === "ni") && typeof named.name === "string") vals(target ?? ".").forEach((p) => addFile(path5.join(p, named.name)));
+      else if (name === "new-item" || name === "ni") vals(target).forEach(addFile);
+      else vals(target).forEach(addTarget);
+      return;
+    }
+    if (PS_REMOVE.has(name)) {
+      out.ran = true;
+      for (const w2 of vals(pick(PS_PATHS) ?? pos2[0])) {
+        const { s, unresolved } = expand(w2);
+        const p = !unresolved && abs(s);
+        if (p) out.removed.add(p);
+      }
+      return;
+    }
+    if (PS_COPY.has(name) || PS_MOVE.has(name)) {
+      out.ran = true;
+      const move = PS_MOVE.has(name);
+      const literal = pick(["literalpath", "lp", "pspath"]) !== void 0;
+      const srcW = pick(PS_PATHS) ?? pos2.shift();
+      const destW = typeof named.destination === "string" ? named.destination : pos2.shift();
+      const recurse = move || Object.keys(named).some((n) => "recurse".startsWith(n));
+      const d = destW === void 0 ? { s: dir ?? "", unresolved: !dir } : expand(destW);
+      const to = d.unresolved ? null : abs(d.s);
+      const toDir = !!to && (destW === void 0 || /[\\/]$/.test(d.s) || !!statOf(to)?.isDirectory());
+      const tree = (srcDir, root) => {
+        const t = htmlTree(srcDir);
+        t.rels.forEach((r2) => out.written.add(path5.join(root, r2)));
+        if (t.cut) out.notes.add(`${srcDir} \uC548\uC758 HTML\uC740 ${TREE_MAX}\uAC1C\uAE4C\uC9C0\uB9CC \uAE30\uB85D\uD588\uC2B5\uB2C8\uB2E4. \uC62E\uAE34 HTML\uC774 \uB354 \uC788\uC73C\uBA74 ensure\uB97C \uC2E4\uD589\uD558\uC138\uC694`);
+      };
+      for (const w2 of vals(srcW)) {
+        const { s, unresolved } = expand(w2);
+        const from = !unresolved && abs(s);
+        if (!toDir) {
+          if (isHtml(d.s)) to ? out.written.add(to) : out.unknown.add(d.s);
+          else if (!to && isHtml(s)) out.unknown.add(`${a3[0]} ${s} \u2192 ${d.s}`);
+          else if (to && recurse && (move ? statOf(to)?.isDirectory() : from && statOf(from)?.isDirectory())) tree(move ? to : from, to);
+        } else if (unresolved) {
+          if (isHtml(s) || hasGlob(s)) out.unknown.add(`${a3[0]} ${s} \u2192 ${d.s}`);
+        } else if (hasGlob(s) && !literal) {
+          const names = expandGlob(from);
+          if (names === null || !names.length && move) out.unknown.add(`${a3[0]} ${s} \u2192 ${d.s}`);
+          for (const n of names || []) {
+            const st2 = statOf(n);
+            const into = path5.join(to, path5.basename(n));
+            if (st2?.isFile() && isHtml(n)) out.written.add(into);
+            else if (st2?.isDirectory() && recurse) tree(n, into);
+          }
+        } else if (isHtml(s)) out.written.add(path5.join(to, path5.basename(s)));
+        else if (recurse) {
+          const into = path5.join(to, path5.basename(s));
+          if (move ? statOf(into)?.isDirectory() : statOf(from)?.isDirectory()) tree(move ? into : from, into);
+        }
+        if (move && from && !hasGlob(s)) out.removed.add(from);
+      }
+      return;
+    }
+    if (isPsCmdlet(a3[0])) {
+      out.ran = true;
+      htmlWords(a3.slice(1));
+      return;
+    }
+    const words = a3.map((w2) => {
+      const v = w2.replace(/\$(?:\{([^}]+)\}|((?:env:)?\w+))/gi, (all, x2, y) => lookup(x2 ?? y) ?? all).replaceAll(PS_SEP, ",");
+      return v.includes(PS_UNRES) ? "$" + v.replaceAll(PS_UNRES, "") : v;
+    });
+    const r = readShell(words.map((w2) => `"${w2.replace(/["\\`]/g, "\\$&")}"`).join(" "), dir);
+    for (const key of ["written", "removed", "unknown", "maybe", "notes"]) r[key].forEach((v) => out[key].add(v));
+    out.ran ||= r.ran;
+    out.wrote ||= r.wrote;
+  };
+  for (const words of psCommands(cmd2)) {
+    const a3 = [];
+    for (let i = 0; i < words.length; i++) {
+      if (words[i] === REDIR) {
+        if (typeof words[i + 1] === "string") {
+          if (!/^\$null$/i.test(words[i + 1])) out.wrote = true;
+          addFile(words[++i]);
+        }
+      } else a3.push(words[i]);
+    }
+    if (a3.length) run(a3, !!words.call);
+  }
+  return out;
+}
 var READ_TOOLS = /^(?:Read|Glob|Grep|LS|NotebookRead|WebFetch|WebSearch|TodoWrite|TodoRead|Task|view|read_file|list_files|search)$/;
-function effectsOf(i) {
+function effectsOf(i, platform = process.platform) {
   const cwd = cwdOf(i);
   const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), maybe: /* @__PURE__ */ new Set(), notes: /* @__PURE__ */ new Set(), ran: false, active: false };
   const add = (p) => {
-    if (typeof p === "string" && isHtml(p)) out.written.add(path5.resolve(cwd, p.replace(/^~(?=\/)/, HOME())));
+    if (typeof p === "string" && isHtml(p)) out.written.add(path5.resolve(cwd, p.replace(platform === "win32" ? /^~(?=[\/\\])/ : /^~(?=\/)/, HOME())));
   };
+  const powershell = /^powershell$/i.test(i.tool_name || "");
   const t = i.tool_input || i.input || {};
   const readTool = READ_TOOLS.test(i.tool_name || "");
   const paths2 = [i.file_path, t.file_path, t.path, t.notebook_path].filter((p) => typeof p === "string" && p);
@@ -12957,10 +13418,16 @@ function effectsOf(i) {
       for (const m of text.matchAll(/\*\*\* (?:Add File|Update File|Move to): (.+)/g)) add(m[1].trim());
       continue;
     }
-    const r = readShell(text, cwd);
-    for (const k of ["written", "removed", "unknown", "maybe", "notes"]) r[k].forEach((v) => out[k].add(v));
-    out.ran ||= r.ran;
-    out.active ||= r.ran || r.wrote || r.written.size > 0;
+    const readers = powershell ? [readPowerShell] : platform === "win32" && looksPowerShell(text) ? [readShell, readPowerShell] : [readShell];
+    for (const read of readers) {
+      const r = read(text, cwd);
+      if (readers.length > 1 && read === readShell) {
+        for (const p of r.written) if (!statOf(p)) r.written.delete(p);
+      }
+      for (const k of ["written", "removed", "unknown", "maybe", "notes"]) r[k].forEach((v) => out[k].add(v));
+      out.ran ||= r.ran;
+      out.active ||= r.ran || r.wrote || r.written.size > 0;
+    }
   }
   return out;
 }
@@ -13008,17 +13475,17 @@ var isHomeOrRoot = (cwd) => {
 function gitState(file) {
   let d = path5.dirname(path5.resolve(file));
   for (; !fs6.existsSync(path5.join(d, ".git")); d = path5.dirname(d)) if (d === path5.dirname(d)) return "none";
-  const r = spawnSync("git", ["-C", path5.dirname(path5.resolve(file)), "status", "--porcelain", "--ignored", "--", path5.basename(file)], { encoding: "utf-8", timeout: 5e3 });
+  const r = spawnSync3("git", ["-C", path5.dirname(path5.resolve(file)), "status", "--porcelain", "--ignored", "--", path5.basename(file)], { encoding: "utf-8", timeout: 5e3 });
   if (r.error || r.status !== 0) return "none";
   if (!r.stdout.trim()) return "same";
   return r.stdout.startsWith("!!") ? "ignored" : "changed";
 }
 function lastCommit(file) {
   const dir = path5.dirname(path5.resolve(file));
-  const r = spawnSync("git", ["-C", dir, "log", "-1", "--format=%H %at %ct", "--", path5.basename(file)], { encoding: "utf-8", timeout: 5e3 });
+  const r = spawnSync3("git", ["-C", dir, "log", "-1", "--format=%H %at %ct", "--", path5.basename(file)], { encoding: "utf-8", timeout: 5e3 });
   const [hash, at2, ct2] = (r.status === 0 ? r.stdout.trim() : "").split(" ");
   if (!hash || !(Number(at2) > 0) || !(Number(ct2) > 0)) return null;
-  const g = spawnSync("git", ["-C", dir, "reflog", "-n", "500", "--format=%H %gs"], { encoding: "utf-8", timeout: 5e3 });
+  const g = spawnSync3("git", ["-C", dir, "reflog", "-n", "500", "--format=%H %gs"], { encoding: "utf-8", timeout: 5e3 });
   const lines = g.status === 0 ? g.stdout.split("\n").filter(Boolean) : [];
   const local = !lines.length || lines.some((l) => l.startsWith(`${hash} commit`));
   return { at: Number(at2), ct: Number(ct2), local };
@@ -13479,13 +13946,15 @@ try {
   } else if (cmd === "install") {
     console.log(`\uC124\uCE58: ${install(o).join(", ")}`);
     doctor(o).forEach((l) => console.log(l));
-    console.log("\uCC38\uACE0: \uC138 \uC5D0\uC774\uC804\uD2B8\uC5D0\uC11C \uD6C5\uC774 \uC2E4\uC81C\uB85C \uB3C4\uB294\uC9C0\uB294 \uC544\uC9C1 \uC2E4\uCE21 \uC804\uC785\uB2C8\uB2E4(\uBCF4\uC7A5 \uC544\uB2D8). \uC790\uC138\uD55C \uBC94\uC704\uB294 README\uB97C \uBCF4\uC138\uC694");
+    console.log("\uCC38\uACE0: \uD6C5\uC740 macOS\uC758 Claude Code\xB7Codex\xB7Cursor\uC5D0\uC11C \uD655\uC778\uD588\uC2B5\uB2C8\uB2E4. Cursor CLI(agent -p)\uC5D0\uC11C\uB294 \uACB0\uACFC\uAC00 ~/.doc-kit/hook.log\uC5D0\uB9CC \uB0A8\uC2B5\uB2C8\uB2E4. \uC790\uC138\uD55C \uBC94\uC704\uB294 README\uB97C \uBCF4\uC138\uC694");
   } else if (cmd === "uninstall") {
     console.log(`\uC81C\uAC70: ${uninstall(o).join(", ")}`);
   } else if (cmd === "doctor") {
     const lines = doctor(o);
     lines.forEach((l) => console.log(l));
     process.exitCode = lines.some((l) => l.startsWith("\uBB38\uC81C")) ? 1 : 0;
+  } else if (cmd === "--version") {
+    console.log(VERSION);
   } else if (cmd === "hook") {
     await hook(pos[0], pos[1]);
   } else {
