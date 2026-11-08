@@ -2,7 +2,7 @@
 
 HTML 문서에 뷰어와 편집기를 항상 넣어 주는 스킬입니다. Claude Code, Codex, Cursor에서 쓸 수 있습니다. 모델은 본문만 쓰고, 뷰어·편집기는 고정 명령이 넣습니다. 모델이 지침을 어기고 HTML을 직접 써도 작업이 끝날 때 훅이 복구하도록 설계했습니다.
 
-> **확인 범위(2026-11-08):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. **Windows는 아직 확인하지 못했습니다**([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
+> **확인 범위(2026-11-08):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. Windows 확인은 1단계 범위에서 빼 후속으로 남겼습니다([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
 
 - 요구사항: [PRD.md](PRD.md), 작업계획: [PLAN.md](PLAN.md)
 - 시험 현황: [test/REGRESSION_STATUS.md](test/REGRESSION_STATUS.md), 에이전트 실측: [test/probe/RESULTS.md](test/probe/RESULTS.md)
