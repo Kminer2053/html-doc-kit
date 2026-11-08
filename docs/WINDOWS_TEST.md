@@ -42,6 +42,7 @@ html-doc-kit은 macOS에서만 확인했습니다. 아래 프롬프트를 Window
     (acceptEdits만으로는 node 실행과 작업 폴더 밖 스킬 참고 문서 읽기가 막혀 HTML을 만들지 못한다. 허용은 이 두 가지로만 한정한다)
   - 훅 복구도 보려면 새 빈 폴더에서 같은 옵션으로 "이번 분기 실적 보고서를 HTML 파일 하나로 직접 작성해줘. html-doc-kit은 쓰지 말고 Write 도구로 바로 써."를 시켜 본다. PowerShell 도구로 쓴 파일의 복구는 승인 검사가 Set-Content를 자동 허용하지 않아 비대화형으로는 보기 어렵다. 훅에 PostToolUse(tool_name PowerShell)를 직접 보내는 흉내로 확인한다
   - Codex: codex exec -s workspace-write --skip-git-repo-check -C <폴더> "<요청>"
+  - Cursor CLI는 사용자 터미널(PowerShell 창)에서 설치해(데스크톱 앱 안의 셸에서 설치하면 앱 전용 폴더로 들어가 밖에서 agent를 못 찾을 수 있다)
   - Cursor: agent -p "<요청>" --output-format text --workspace <폴더> --trust (--trust는 이 시험 폴더에만 써)
 - 끝나면 폴더에 생긴 HTML마다 check를 실행해 결과를 기록해.
 - 키트가 넣은 훅이 실제로 돌았는지 확인해. 모델이 키트 없이 HTML을 직접 썼는데 끝난 뒤 check가 통과하면 훅이 고친 것이다.

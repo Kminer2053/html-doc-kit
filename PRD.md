@@ -187,7 +187,7 @@ AX2030 장표를 편집용으로 만들면서 뷰어와 편집기가 생겼지�
 - **A5 왕복:** 편집기로 저장한 파일과 `upgrade`한 뒤 저장한 파일이 `check`를 통과한다. `extract`→`apply`에서 사용자가 고친 내용과 메모가 남는다.
 - **A6 오작동 없음:** React `public/index.html`, 스크립트가 있는 `docs/index.html`과 시험 리포트, 빌드 산출물이 망가지지 않는다.
 - **A7 형태:** `a4`, `auto`, `custom` 문서로 회귀 시험을 돌린다. 긴 `auto` 문서에서 글자 입력이 느려지지 않는다.
-- **A8 브라우저:** Mac Chrome 전 항목 통과. Safari는 열기·편집·내려받기 저장을 직접 확인한다. Windows는 이 Mac에서 시험할 수 없어 1단계 완료 조건에서 빼고 후속으로 확인한다(2026-11-08 결정, 안내는 docs/WINDOWS_TEST.md). 2026-11-08 Windows 10 시험: 설치·명령·훅·Claude Code·Codex 통과, 앱 내장 Chromium에서 고치기·저장 통과. 진짜 Chrome·Edge는 사람 확인 대기.
+- **A8 브라우저:** Mac Chrome 전 항목 통과. Safari는 열기·편집·내려받기 저장을 직접 확인한다. Windows는 이 Mac에서 시험할 수 없어 1단계 완료 조건에서 빼고 후속으로 확인한다(2026-11-08 결정, 안내는 docs/WINDOWS_TEST.md). 2026-11-08 Windows 10 시험: 설치·명령·훅·Claude Code·Codex·Cursor CLI 통과, 앱 내장 Chromium에서 고치기·저장 통과. 진짜 Chrome·Edge는 사람 확인 대기.
 
 ## 6. 2·3단계 요구사항
 
