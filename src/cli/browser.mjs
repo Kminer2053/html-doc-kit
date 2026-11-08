@@ -44,7 +44,9 @@ export function sweepProfiles({dir = os.tmpdir(), now = Date.now()} = {}) {
     try {
       if (now - fs.statSync(f).mtimeMs < 3600000) continue;
       const chromeMade = fs.existsSync(path.join(f, 'Local State')) || fs.existsSync(path.join(f, 'DevToolsActivePort')) || fs.statSync(path.join(f, 'Default'), {throwIfNoEntry: false})?.isDirectory();
+      // Windows에서는 안쪽 파일만 지워지고 빈 폴더가 남기도 한다. mkdtemp 이름 꼴의 빈 폴더도 치운다
       if (chromeMade) fs.rmSync(f, {recursive: true, force: true});
+      else if (/^doc-kit-[A-Za-z0-9]{6}$/.test(d.name) && !fs.readdirSync(f).length) fs.rmdirSync(f);
     } catch {}
   }
 }
