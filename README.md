@@ -2,7 +2,7 @@
 
 HTML 문서에 뷰어와 편집기를 항상 넣어 주는 스킬입니다. Claude Code, Codex, Cursor에서 쓸 수 있습니다. 모델은 본문만 쓰고, 뷰어·편집기는 고정 명령이 넣습니다. 모델이 지침을 어기고 HTML을 직접 써도 작업이 끝날 때 훅이 복구하도록 설계했습니다.
 
-> **보장 범위(실측 전):** 저장 뒤·끝날 때 훅과 훅 안의 브라우저 시험은 세 에이전트 모두 실제 에이전트로 아직 확인하지 못했습니다([실측 표](test/probe/RESULTS.md)). 격리한 시험에서 훅 입력을 흉내 내 확인한 동작입니다. 낮은 모델 수용 시험(A3)을 통과하기 전까지는 보장이 아니라 설계 목표로 읽으세요. 꼭 필요한 문서는 `check`로 직접 확인하세요.
+> **확인 범위(2026-11-08):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. **Windows는 아직 확인하지 못했습니다**([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
 
 - 요구사항: [PRD.md](PRD.md), 작업계획: [PLAN.md](PLAN.md)
 - 시험 현황: [test/REGRESSION_STATUS.md](test/REGRESSION_STATUS.md), 에이전트 실측: [test/probe/RESULTS.md](test/probe/RESULTS.md)
@@ -19,7 +19,7 @@ node skill/html-doc-kit/scripts/doc-kit.mjs install
 
 `--agents codex`처럼 일부만 넣고 뺄 수 있습니다(`uninstall --agents cursor`). 함께 쓰는 스킬 폴더와 실행 파일은 쓰는 에이전트가 없어질 때 지웁니다. 점검은 `doctor`이며 문제가 있으면 종료 코드 1입니다.
 
-**Codex는 훅을 처음 한 번 직접 승인해야 합니다.** 터미널에서 `codex`를 실행해 안내를 따르세요. 승인 전에는 Codex에서 자동 복구가 돌지 않으며, `doctor`는 prompt·post·stop 세 훅의 승인을 보고 하나라도 없으면 문제로 알립니다. 전역 훅의 승인 표시 형식은 아직 실제 승인으로 확인하지 못했으므로, 승인했는데도 문제로 나오면 알려 주세요. Codex를 쓰지 않으면 `uninstall --agents codex`로 빼세요.
+**Codex는 훅을 처음 한 번 직접 승인해야 합니다.** 터미널에서 `codex`를 실행해 안내를 따르세요. 승인 전에는 Codex에서 자동 복구가 돌지 않으며, `doctor`는 prompt·post·stop 세 훅의 승인을 보고 하나라도 없으면 문제로 알립니다. Codex를 쓰지 않으면 `uninstall --agents codex`로 빼세요.
 
 ## 명령
 
