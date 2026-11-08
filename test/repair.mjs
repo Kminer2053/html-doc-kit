@@ -12,6 +12,16 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.join(here, '../skill/html-doc-kit/scripts/doc-kit.mjs');
 const OUT = path.join(here, 'out', 'repair');
 fs.rmSync(OUT, {recursive: true, force: true});
+// 시험 임시 폴더(설치 사본 포함, 하나에 수백 MB)는 끝날 때 지운다. 남겨 두면 실행마다 디스크가 찬다
+const TMP_DIRS = [];
+const tmpDir = (prefix) => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+  TMP_DIRS.push(d);
+  return d;
+};
+process.on('exit', () => {
+  if (!process.env.DOC_KIT_KEEP_TMP) for (const d of TMP_DIRS) fs.rmSync(d, {recursive: true, force: true});
+});
 fs.mkdirSync(OUT, {recursive: true});
 let fails = 0;
 const ok = (name, cond, extra = '') => {
@@ -412,7 +422,7 @@ const future = fs.readFileSync(ef('deck.html'), 'utf-8').replace(/data-doc-kit="
 fs.writeFileSync(ef('future.html'), future);
 const fc = run('check', ef('future.html'));
 ok('29 부품이 온전한 새 버전 파일은 check 완성·경고', fc.status === 0 && fc.stdout.includes('새것'), fc.stdout);
-const uTmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-up-'));
+const uTmp = tmpDir('dk-up-');
 const newCli = path.join(uTmp, 'doc-kit.mjs');
 const bundle = fs.readFileSync(CLI, 'utf-8');
 ok('23 시험 번들 준비', /var VERSION = "1\.0\.0"/.test(bundle));
@@ -618,7 +628,7 @@ ok('52 키트가 만든 파일은 통과', run('check', ef('deck.html')).status 
 
 // A6 + 훅: 임시 홈과 임시 프로젝트
 // 저장소 안의 test/out은 앱 폴더로 판정되므로 저장소 밖에서 시험한다
-const HK = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-hook-'));
+const HK = tmpDir('dk-hook-');
 const home = path.join(HK, 'home');
 const proj = path.join(HK, 'proj');
 fs.mkdirSync(path.join(proj, 'docs'), {recursive: true});
@@ -799,7 +809,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
 
 // === 훅·설치 회귀. 대부분 브라우저 없이(C6 미실행) 빠르게 돈다
 {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'dk-hook2-'));
+  const root = tmpDir('dk-hook2-');
   const hhome = path.join(root, 'home');
   const hasKit = (f) => fs.existsSync(f) && fs.readFileSync(f, 'latin1').includes('dk-kit-code');
   const size = (f) => fs.statSync(f).size;
@@ -1721,6 +1731,45 @@ if (findChrome()) {
   ok('61 한 시간 안 된 프로필과 프로필 아닌 doc-kit-* 폴더는 둠', fs.existsSync(fresh) && fs.existsSync(other));
   fs.rmSync(tmp, {recursive: true, force: true});
 } else console.log('SKIP 61 임시 프로필 정리: Chrome 없음');
+
+// 62: 한국어 굵게(닫는 ** 뒤에 바로 한글)와, 차트 SVG 안의 <style>만 있을 때 기본 모양 유지
+{
+  const d = tmpDir('dk-kor-');
+  const md = path.join(d, 'a.md');
+  fs.writeFileSync(md, '# 제목\n\n영업이익률 **12.7%**로, **(482억)**은 늘었고 **A** 그리고 *기울임*. ***12.7%***로 **강조 *기울임* 12%**로 **a\\*b%**로 끝 **12%\\**로 `**코드**로`\n\n| 가 | 나 |\n|---|---|\n| 1 | 2 |\n\n<svg viewBox="0 0 10 10"><style>.lbl{fill:#555}</style><text class="lbl" x="1" y="5">1</text></svg>\n');
+  const out = path.join(d, 'a.html');
+  const r = run('build', md, '-o', out, '--no-browser');
+  const html = fs.readFileSync(out, 'utf-8');
+  const want = ['<strong>12.7%</strong>로', '<strong>(482억)</strong>은', '<strong>A</strong>', '<em>기울임</em>', '<strong><em>12.7%</em></strong>로', '<strong>강조 <em>기울임</em> 12%</strong>로', '<strong>a*b%</strong>로', '**12%**로', '<code>**코드**로</code>'];
+  ok('62 닫는 ** 뒤에 한글이 붙어도 굵게(기울임·이스케이프·코드는 그대로)', r.status === 0 && want.every((w) => html.includes(w)), want.filter((w) => !html.includes(w)).join(' | ') + r.stderr);
+  const plainMain = (f) => /<main id="dk-document" data-dk-plain="">/.test(fs.readFileSync(f, 'utf-8'));
+  ok('62 SVG 안의 스타일만 있으면 기본 모양(data-dk-plain)', plainMain(out));
+  ok('62 SVG 안의 스타일은 범위를 씌워 제자리에 둠', html.includes('<style>#dk-document .dk-page-inner .lbl{fill:#555}</style>'));
+  ok('62 그 파일이 check를 통과', run('check', out, '--no-browser').status === 0);
+  const body = path.join(d, 'body.html');
+  run('extract', out, '-o', body);
+  const r2 = run('apply', body, out, '--no-browser');
+  ok('62 extract·apply 뒤에도 기본 모양 유지', r2.status === 0 && plainMain(out), r2.stdout + r2.stderr);
+  // 문서 스타일을 더했다가 다시 빼면 기본 모양으로 돌아온다
+  fs.writeFileSync(body, '<style>p{color:red}</style>' + fs.readFileSync(body, 'utf-8'));
+  run('apply', body, out, '--no-browser');
+  const styled = !plainMain(out);
+  run('extract', out, '-o', body);
+  fs.writeFileSync(body, fs.readFileSync(body, 'utf-8').replace(/<style>[^<]*color:red[^<]*<\/style>/, ''));
+  run('apply', body, out, '--no-browser');
+  ok('62 문서 스타일을 넣으면 기본 모양을 끄고, 빼면 다시 켬', styled && plainMain(out));
+  const own = path.join(d, 'own.html');
+  fs.writeFileSync(own, '<style>p{color:red}</style><p>x</p><svg><style>.a{fill:red}</style><text class="a">1</text></svg>');
+  run('build', own, '-o', path.join(d, 'own2.html'), '--no-browser');
+  ok('62 문서 자체 스타일이 있으면 기본 모양을 쓰지 않음', !plainMain(path.join(d, 'own2.html')));
+  const fo = path.join(d, 'fo.html');
+  fs.writeFileSync(fo, '<svg><foreignObject><div><style>body{background:red}</style>x</div></foreignObject></svg>');
+  run('build', fo, '-o', path.join(d, 'fo2.html'), '--no-browser');
+  ok('62 foreignObject 안의 스타일은 문서 스타일로 봄', !plainMain(path.join(d, 'fo2.html')));
+  const leak = path.join(d, 'leak.html');
+  fs.writeFileSync(leak, html.replace('#dk-document .dk-page-inner .lbl{fill:#555}', 'body{display:none}'));
+  ok('62 SVG 안이라도 범위 밖으로 새는 스타일은 check가 막음', run('check', leak, '--no-browser').status === 1);
+}
 
 console.log(fails ? `\n실패 ${fails}건` : '\n모두 통과');
 process.exit(fails ? 1 : 0);

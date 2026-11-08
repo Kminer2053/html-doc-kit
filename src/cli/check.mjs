@@ -2,6 +2,7 @@
 import crypto from 'node:crypto';
 import {attr, byId, classes, find, findAll, htmlOf, isScriptAnimation, isScriptAttr, parse, walk} from './html.mjs';
 import {HASHES, VERSION} from './assets.gen.mjs';
+import {scopeCss} from './css.mjs';
 
 export const sha = (s) => crypto.createHash('sha256').update(s.replace(/\r\n?/g, '\n')).digest('hex').slice(0, 32);
 const textIn = (n) => (n ? n.childNodes.map((c) => c.value || '').join('') : null);
@@ -41,6 +42,14 @@ function cssErrors(css) {
   }
   return out;
 }
+
+const inSvg = (n) => {
+  for (let p = n.parentNode; p; p = p.parentNode) {
+    if (p.tagName === 'foreignObject') return false;
+    if (p.tagName === 'svg') return true;
+  }
+  return false;
+};
 
 // C1~C5: 브라우저 없이 판정한다
 export function inspect(source) {
@@ -86,7 +95,9 @@ export function inspect(source) {
     }
     if (n.tagName === 'style') {
       const known = [...KIT_STYLES, ...DOC_STYLES].includes(id);
-      if (!known && !future) errors.push('C5 키트 밖 스타일이 있습니다');
+      // SVG 안의 스타일(차트 글자 모양)은 범위를 씌운 채로 그 자리에 둔다. 범위 밖으로 새는 규칙이 없을 때만 허용한다
+      const svgOwn = !known && !id && inSvg(n) && scopeCss(textIn(n) || '') === (textIn(n) || '');
+      if (!known && !svgOwn && !future) errors.push('C5 키트 밖 스타일이 있습니다');
       // media, disabled 같은 속성으로 키트 CSS를 끌 수 있다
       if (known && !future && n.attrs.length !== 1) errors.push(`C5 키트 부품의 속성이 바뀌었습니다: ${id}`);
       // 키트 부품 글자는 해시로 이미 확인했다

@@ -15,6 +15,39 @@ export const SIZES = {
 };
 const DROP = new Set(['script', 'iframe', 'object', 'embed', 'base', 'noscript', 'frame', 'frameset', 'applet']);
 const MIME = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.gif': 'image/gif', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.avif': 'image/avif', '.bmp': 'image/bmp', '.woff': 'font/woff', '.woff2': 'font/woff2', '.ttf': 'font/ttf', '.otf': 'font/otf'};
+// 굵게(**)를 닫은 바로 뒤에 한글·한자·가나가 붙으면(예: **12.7%**로) CommonMark 규칙상 굵게가 되지 않고 별표가 그대로 남는다.
+// 한국어 본문에서 흔하므로, 닫는 ** 뒤가 그런 글자일 때만 굵게로 읽는다. 나머지는 marked 기본 규칙을 따른다
+const CJK = '\\u1100-\\u11ff\\u3040-\\u30ff\\u3130-\\u318f\\u3400-\\u4dbf\\u4e00-\\u9fff\\uac00-\\ud7af';
+// 안쪽에는 이스케이프(\\*)와 별표 하나짜리 기울임(*…*)을 허용하고, 끝 글자가 역슬래시이면(닫는 별표를 이스케이프함) 굵게로 보지 않는다
+const STRONG_IN = '(?:\\\\.|\\*[^*\\n]+\\*|[^*\\\\\\n])';
+const STRONG_END = '(?:\\\\.|\\*[^*\\n]+\\*|[^\\s*\\\\])';
+const CJK_STRONG = new RegExp(`^\\*\\*(?=[^\\s*])(${STRONG_IN}*?${STRONG_END})\\*\\*(?=[${CJK}])`);
+const CJK_STRONG_EM = new RegExp(`^\\*\\*\\*(?=[^\\s*])(${STRONG_IN}*?${STRONG_END})\\*\\*\\*(?=[${CJK}])`);
+marked.use({
+  extensions: [{
+    name: 'cjkStrong',
+    level: 'inline',
+    start: (src) => {
+      const i = src.indexOf('**');
+      return i < 0 ? undefined : i;
+    },
+    tokenizer(src) {
+      const t = CJK_STRONG_EM.exec(src);
+      if (t) return {type: 'strong', raw: t[0], text: t[1], tokens: [{type: 'em', raw: `*${t[1]}*`, text: t[1], tokens: this.lexer.inlineTokens(t[1])}]};
+      const m = CJK_STRONG.exec(src);
+      if (m) return {type: 'strong', raw: m[0], text: m[1], tokens: this.lexer.inlineTokens(m[1])};
+    },
+  }],
+});
+// SVG 안의 <style>(차트 글자 모양 등)은 문서 전체 모양이 아니다. 문서 스타일로 옮기지 않고 그 자리에서 범위만 씌운다.
+// 그래야 이것만 있는 문서가 기본 모양을 쓰고, 본문을 꺼내 고쳐 되돌려도 어느 스타일이 SVG 몫인지 잃지 않는다
+const inSvg = (n) => {
+  for (let p = n.parentNode; p; p = p.parentNode) {
+    if (p.tagName === 'foreignObject') return false;
+    if (p.tagName === 'svg') return true;
+  }
+  return false;
+};
 const esc = (s) => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // 주소 글자에서 실제 파일을 찾는다. 경로가 이상하거나 폴더이면 null이다
@@ -97,7 +130,13 @@ export function sanitize(root, baseDir, warn) {
       return false;
     }
     if (tag === 'style') {
-      css.push(inlineCssUrls(n.childNodes.map((c) => c.value || '').join(''), baseDir, warn));
+      const text = inlineCssUrls(n.childNodes.map((c) => c.value || '').join(''), baseDir, warn);
+      if (inSvg(n)) {
+        const scoped = scopeCss(text).replace(/<\//g, '<\\/');
+        n.childNodes = scoped ? [{nodeName: '#text', value: scoped, parentNode: n}] : [];
+        return false;
+      }
+      css.push(text);
       remove(n);
       return false;
     }
