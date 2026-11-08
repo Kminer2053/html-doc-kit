@@ -38,6 +38,10 @@ try {
       ['C:/Users/a.html', 'C:/Users/a.html'],
       ['C:\\Users\\a.html', 'C:\\Users\\a.html'],
       ['docs/a.html', 'docs/a.html'],
+      // W7: Cursor 앱은 작업 폴더를 /c:/... 로 넘긴다
+      ['/c:/Users/USER/Documents/a.html', 'C:\\Users\\USER\\Documents\\a.html'],
+      ['/c:', 'C:\\'],
+      ['/cc:/a.html', '/cc:/a.html'],
     ];
     for (const [from, want] of cases) ok(`W1 ${from}`, fromMsys(from, win) === want, fromMsys(from, win));
     ok('W1 윈도가 아니면 그대로', fromMsys('/c/Users/a.html', {platform: 'darwin'}) === '/c/Users/a.html' && fromMsys('/tmp/a.html', {platform: 'linux'}) === '/tmp/a.html');

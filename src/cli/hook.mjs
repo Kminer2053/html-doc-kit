@@ -142,7 +142,7 @@ const readStdin = () => {
     return {};
   }
 };
-const cwdOf = (i) => i.cwd || (i.workspace_roots && i.workspace_roots[0]) || process.cwd();
+const cwdOf = (i) => fromMsys(i.cwd || (i.workspace_roots && i.workspace_roots[0])) || process.cwd();
 const stateFile = (i) => {
   const key = i.session_id || i.conversation_id || cwdOf(i);
   return path.join(stateDir(), crypto.createHash('sha1').update(String(key)).digest('hex').slice(0, 16) + '.json');
@@ -301,10 +301,10 @@ function htmlTree(root) {
   return {rels: out, cut};
 }
 
-// Git Bash(MSYS) 경로를 윈도 경로로 바꾼다. /c/... 는 C:\..., /tmp 는 사용자 임시 폴더다. 윈도가 아니면 그대로 둔다
+// Git Bash(MSYS) 경로를 윈도 경로로 바꾼다. /c/... 와 Cursor 앱이 넘기는 /c:/... 는 C:\..., /tmp 는 사용자 임시 폴더다. 윈도가 아니면 그대로 둔다
 export function fromMsys(s, {platform = process.platform, tmp = os.tmpdir()} = {}) {
   if (platform !== 'win32' || typeof s !== 'string') return s;
-  const d = /^\/([A-Za-z])(?=\/|$)(.*)$/s.exec(s);
+  const d = /^\/([A-Za-z]):?(?=\/|$)(.*)$/s.exec(s);
   if (d) return path.win32.normalize(`${d[1].toUpperCase()}:\\${d[2]}`);
   const t = /^\/tmp(?=\/|$)(.*)$/s.exec(s);
   if (t) return path.win32.join(tmp, t[1]);
@@ -860,7 +860,7 @@ export function effectsOf(i, platform = process.platform) {
   const cwd = cwdOf(i);
   const out = {written: new Set(), removed: new Set(), unknown: new Set(), maybe: new Set(), notes: new Set(), ran: false, active: false};
   const add = (p) => {
-    if (typeof p === 'string' && isHtml(p)) out.written.add(path.resolve(cwd, p.replace(platform === 'win32' ? /^~(?=[\/\\])/ : /^~(?=\/)/, HOME())));
+    if (typeof p === 'string' && isHtml(p)) out.written.add(path.resolve(cwd, fromMsys(p, {platform}).replace(platform === 'win32' ? /^~(?=[\/\\])/ : /^~(?=\/)/, HOME())));
   };
   const powershell = /^powershell$/i.test(i.tool_name || '');
   const t = i.tool_input || i.input || {};

@@ -19,7 +19,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ---
 
 > [!IMPORTANT]
-> **확인 범위(2026-11-08, 1단계 완료):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. Windows 10(PowerShell 5.1·Git Bash)에서 설치·명령·훅과 Claude Code·Codex·Cursor CLI 실행을 확인했습니다(2026-11-08, 키트 없이 직접 쓴 HTML도 훅이 고침). Windows의 Chrome·Edge에서도 열기·고치기·저장(덮어쓰기 포함)을 자동으로 확인했고, 진짜 저장 창에서 원래 파일을 덮어쓰는 것과 그림 끌기만 사람 확인으로 남았습니다([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
+> **확인 범위(2026-11-08, 1단계 완료):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. Windows 10(PowerShell 5.1·Git Bash)에서 설치·명령·훅과 Claude Code·Codex·Cursor CLI 실행을 확인했습니다(2026-11-08, 키트 없이 직접 쓴 HTML도 훅이 고침). Windows의 Chrome·Edge에서도 열기·고치기·저장을 자동으로 확인했고, Chrome에서는 사람이 진짜 저장 창으로 같은 파일 덮어쓰기와 그림 끌기까지 확인했습니다. Cursor 앱으로 만든 보고서도 통과했습니다([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
 
 ## 이런 분께 좋습니다
 
@@ -222,7 +222,7 @@ node skill/html-doc-kit/scripts/doc-kit.mjs check 결과.html   # -> 종료 코�
 
 **모델이 스킬을 안 쓰고 HTML을 직접 쓰면요?** 작업이 끝날 때 훅이 키트를 넣습니다. 끝난 뒤 `check`가 0이면 완성입니다.
 
-**Windows에서도 되나요?** 됩니다. Windows 10에서 설치, 명령, 훅(Git Bash·PowerShell·cmd), Claude Code·Codex·Cursor CLI 실행을 확인했습니다. 훅은 Node 22 이상이 시스템 PATH에 있으면 어느 셸에서나 돌고, 없으면 `doctor`가 알려 줍니다. Codex 앱만 깔아 `codex` 명령이 없으면 훅 승인은 앱 안의 `codex.exe`에 `--no-daemon`을 붙여 실행해 합니다(`doctor`가 경로를 알려 줌). Chrome·Edge는 고치기·저장을 자동으로 확인했고, Cursor 앱 화면에서 시키는 것과 진짜 저장 창·그림 끌기는 사람 확인이 남았습니다. [Windows 시험 안내](docs/WINDOWS_TEST.md)로 직접 시험할 수 있습니다.
+**Windows에서도 되나요?** 됩니다. Windows 10에서 설치, 명령, 훅(Git Bash·PowerShell·cmd), Claude Code·Codex·Cursor CLI 실행을 확인했습니다. 훅은 Node 22 이상이 시스템 PATH에 있으면 어느 셸에서나 돌고, 없으면 `doctor`가 알려 줍니다. Codex 앱만 깔아 `codex` 명령이 없으면 훅 승인은 앱 안의 `codex.exe`에 `--no-daemon`을 붙여 실행해 합니다(`doctor`가 경로를 알려 줌). Chrome에서 진짜 저장 창으로 덮어쓰기와 그림 끌기를 확인했고, Cursor 앱으로 만든 보고서도 통과했습니다. Chrome은 `AppData` 아래(임시 폴더 포함)에는 저장을 막으니, 고칠 문서는 문서 폴더 같은 곳에 두세요. [Windows 시험 안내](docs/WINDOWS_TEST.md)로 직접 시험할 수 있습니다.
 
 **글자가 없는 스캔 PDF도 바꿔 주나요?** 아닙니다. 다른 포맷 변환은 2단계 과제이며, 글자가 없는 스캔 PDF는 처리하지 않습니다.
 
