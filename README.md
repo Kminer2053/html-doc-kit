@@ -19,7 +19,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ---
 
 > [!IMPORTANT]
-> **확인 범위(2026-11-08, 1단계 완료):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. Windows 10(PowerShell 5.1·Git Bash)에서 설치·명령·훅·Claude Code 실행을 확인했습니다(2026-11-08). 진짜 Chrome·Edge에서 고치고 저장하는 확인은 남았습니다([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
+> **확인 범위(2026-11-08, 1단계 완료):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. Windows 10(PowerShell 5.1·Git Bash)에서 설치·명령·훅과 Claude Code·Codex 실행을 확인했습니다(2026-11-08, Codex는 PowerShell로 직접 쓴 HTML도 훅이 고침). 진짜 Chrome·Edge에서 고치고 저장하는 확인은 남았습니다([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
 
 ## 이런 분께 좋습니다
 
@@ -222,7 +222,7 @@ node skill/html-doc-kit/scripts/doc-kit.mjs check 결과.html   # -> 종료 코�
 
 **모델이 스킬을 안 쓰고 HTML을 직접 쓰면요?** 작업이 끝날 때 훅이 키트를 넣습니다. 끝난 뒤 `check`가 0이면 완성입니다.
 
-**Windows에서도 되나요?** 됩니다. Windows 10에서 설치, 명령, 훅(Git Bash·PowerShell·cmd), Claude Code 실행을 확인했습니다. 훅은 Node 22 이상이 시스템 PATH에 있으면 어느 셸에서나 돌고, 없으면 `doctor`가 알려 줍니다. Codex·Cursor는 그 PC에 없어 Windows에서는 시험하지 못했고, Chrome·Edge에서 직접 고치고 저장하는 확인도 남았습니다. [Windows 시험 안내](docs/WINDOWS_TEST.md)로 직접 시험할 수 있습니다.
+**Windows에서도 되나요?** 됩니다. Windows 10에서 설치, 명령, 훅(Git Bash·PowerShell·cmd), Claude Code·Codex 실행을 확인했습니다. 훅은 Node 22 이상이 시스템 PATH에 있으면 어느 셸에서나 돌고, 없으면 `doctor`가 알려 줍니다. Codex 앱만 깔아 `codex` 명령이 없으면 훅 승인은 앱 안의 `codex.exe`에 `--no-daemon`을 붙여 실행해 합니다(`doctor`가 경로를 알려 줌). Cursor는 Windows에서 아직 시험 중이고, Chrome·Edge에서 직접 고치고 저장하는 확인도 남았습니다. [Windows 시험 안내](docs/WINDOWS_TEST.md)로 직접 시험할 수 있습니다.
 
 **글자가 없는 스캔 PDF도 바꿔 주나요?** 아닙니다. 다른 포맷 변환은 2단계 과제이며, 글자가 없는 스캔 PDF는 처리하지 않습니다.
 
