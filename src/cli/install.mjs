@@ -1,4 +1,5 @@
 // 세 에이전트에 스킬·지침·훅을 넣고 뺀다. 사용자의 기존 설정은 보존한다
+import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -34,6 +35,65 @@ const samePath = (a, b) => {
   };
   return real(a) === real(b);
 };
+// Windows PowerShell은 따옴표로 시작하는 줄을 식으로 읽어 훅이 깨진다. 그래서 Windows에서는 PATH의 node를 맨 이름으로 부른다
+const envGet = (env, k) => env[Object.keys(env).find((x) => x.toUpperCase() === k)];
+// node 파일의 주 판 번호. 못 돌리면 NaN
+export function probeNode(file) {
+  const r = spawnSync(file, ['--version'], {encoding: 'utf-8', timeout: 10000, windowsHide: true});
+  return r.status === 0 ? Number(/^v(\d+)\./.exec(String(r.stdout).trim())?.[1]) : NaN;
+}
+// 주어진 PATH에서 셸이 고를 node를 찾는다. .exe이고 Node 22 이상일 때만 쓴다
+function findNode(pathStr, {platform, env, execPath, probe}) {
+  const sep = platform === 'win32' ? ';' : ':';
+  const exts = platform === 'win32' ? (envGet(env, 'PATHEXT') || '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean) : [''];
+  for (const dir of (pathStr || '').split(sep).filter(Boolean)) {
+    const hit = exts.map((x) => path.join(dir.replace(/^"|"$/g, ''), 'node' + x.toLowerCase())).find((f) => fs.existsSync(f) && fs.statSync(f).isFile());
+    if (!hit) continue;
+    if (platform === 'win32' && !hit.endsWith('.exe')) return null;
+    if (samePath(hit, execPath)) return hit;
+    return probe(hit) >= 22 ? hit : null;
+  }
+  return null;
+}
+// reg query 출력에서 Path 값을 꺼낸다
+export function parseRegPath(out) {
+  return /^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im.exec(String(out || ''))?.[1].trim() ?? null;
+}
+// reg.exe는 콘솔 코드 페이지(한국어 Windows는 CP949)로 출력해 한글 경로가 깨진다. 먼저 PowerShell에서 UTF-8로 받고, 안 되면 reg로 읽는다
+const readRegPath = (key) => {
+  const target = key.startsWith('HKLM') ? 'Machine' : 'User';
+  const script = `[Console]::OutputEncoding=[Text.Encoding]::UTF8; $v=[Environment]::GetEnvironmentVariable('Path','${target}'); if ($null -eq $v) { exit 3 }; [Console]::Out.Write($v)`;
+  const ps = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], {encoding: 'utf-8', timeout: 15000, windowsHide: true});
+  if (ps.status === 0) return ps.stdout.trim();
+  const r = spawnSync('reg', ['query', key, '/v', 'Path'], {encoding: 'utf-8', timeout: 10000, windowsHide: true});
+  return r.status === 0 ? parseRegPath(r.stdout) : null;
+};
+// 시작 메뉴로 켠 앱이 받는 PATH. 시스템 값 뒤에 사용자 값을 붙이고 %VAR%를 푼다. 시스템 값을 못 읽으면 null
+export function persistentPath({env = process.env, readReg = readRegPath} = {}) {
+  const sys = readReg('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment');
+  if (sys == null) return null;
+  const user = readReg('HKCU\\Environment') || '';
+  const expand = (s) => s.replace(/%([^%;]+)%/g, (m, k) => envGet(env, k.toUpperCase()) ?? m);
+  return [sys, user].filter(Boolean).map(expand).join(';');
+}
+// Windows에서는 시작 메뉴로 켠 앱이 받는 영구 PATH에서 찾은 node만 쓴다. fnm 세션 폴더 안의 것은 버린다
+// 지금 셸 PATH가 고르는 node도 쓸 만해야 한다(셸에서 켠 에이전트용)
+export function pathNode({platform = process.platform, env = process.env, execPath = process.execPath, probe = probeNode, readReg} = {}) {
+  const o = {platform, env, execPath, probe};
+  if (platform !== 'win32') return findNode(envGet(env, 'PATH'), o);
+  const persist = persistentPath({env, readReg});
+  const hit = persist == null ? null : findNode(persist, o);
+  if (!hit) return null;
+  const fnm = envGet(env, 'FNM_MULTISHELL_PATH');
+  const rel = fnm ? path.relative(fnm, hit) : '..';
+  if (!rel.startsWith('..') && !path.isAbsolute(rel)) return null;
+  return findNode(envGet(env, 'PATH'), o) ? hit : null;
+}
+// 훅 명령의 첫 낱말. Windows에서 쓸 만한 node가 PATH에 없을 때만 따옴표 경로로 둔다. 다른 OS는 예전 그대로다
+export function nodeToken({platform = process.platform, env = process.env, execPath = process.execPath, probe, readReg} = {}) {
+  if (platform === 'win32' && pathNode({platform, env, execPath, probe, readReg})) return 'node';
+  return `"${execPath}"`;
+}
 const isSkill = (d) => fs.existsSync(path.join(d, 'SKILL.md')) && fs.existsSync(path.join(d, 'scripts', 'doc-kit.mjs'));
 const readJson = (f, fallback) => {
   try {
@@ -137,20 +197,20 @@ function copySkill(src, to) {
   fs.renameSync(tmp, to);
 }
 
-export function install({home = os.homedir(), agents = ALL_AGENTS} = {}) {
+export function install({home = os.homedir(), agents = ALL_AGENTS, platform = process.platform, env = process.env, probe, readReg} = {}) {
   checkAgents(agents);
   const p = paths(home);
   const src = findSource(p);
-  const node = process.execPath;
+  const node = nodeToken({platform, env, probe, readReg});
   fs.mkdirSync(path.dirname(p.bin), {recursive: true});
   if (!samePath(path.join(src, 'scripts', 'doc-kit.mjs'), p.bin)) fs.copyFileSync(path.join(src, 'scripts', 'doc-kit.mjs'), p.bin);
-  const cmd = (a, e) => `"${node}" "${p.bin}" hook ${a} ${e}`;
+  const cmd = (a, e) => `${node} "${p.bin}" hook ${a} ${e}`;
   const done = [];
   if (agents.includes('claude')) {
     copySkill(src, p.claudeSkill);
     const c = readJson(p.claudeSettings, {});
     mergeNested(c, 'UserPromptSubmit', nestedHook(cmd('claude', 'prompt')));
-    mergeNested(c, 'PostToolUse', nestedHook(cmd('claude', 'post'), 'Write|Edit|MultiEdit|Bash'));
+    mergeNested(c, 'PostToolUse', nestedHook(cmd('claude', 'post'), 'Write|Edit|MultiEdit|Bash|PowerShell'));
     mergeNested(c, 'Stop', nestedHook(cmd('claude', 'stop')));
     writeJson(p.claudeSettings, c);
     upsertBlock(p.claudeMd, rules(p.bin));
@@ -212,7 +272,21 @@ const CODEX_EVENTS = {prompt: 'user_prompt_submit', post: 'post_tool_use', stop:
 const codexTrusted = (conf, event) => new RegExp(`\\[hooks\\.state\\."[^"]*\\.codex/hooks\\.json:${event}:[^"]*"\\]\\s*\\n\\s*trusted_hash`, 'i').test(conf);
 
 // agents를 주지 않으면 설치 흔적이 있는 에이전트를 본다. 흔적이 하나도 없으면 전부 본다
-export function doctor({home = os.homedir(), agents} = {}) {
+// 설치된 우리 훅 명령들. 앞부분(node와 실행 파일)이 같은지 보고 시험하는 데 쓴다
+const ourCommands = (hooks) => Object.values(hooks).flatMap((l) => (Array.isArray(l) ? l : [])).flatMap((h) => [h?.command, ...(Array.isArray(h?.hooks) ? h.hooks.map((x) => x?.command) : [])]).filter(isOurCommand);
+// 훅 명령을 cmd.exe와 PowerShell로 직접 돌려 본다. 실행 파일 뒤에 --version만 붙인다
+// PATH는 시작 메뉴로 켠 앱이 받는 영구 PATH로 바꿔 돌린다. 못 읽으면 지금 환경 그대로다
+function smoke(prefix, env, persist) {
+  const want = (r) => r.status === 0 && r.stdout.trim() === VERSION;
+  const line = `${prefix} --version`;
+  const base = Object.fromEntries(Object.entries(env).filter(([k]) => k.toUpperCase() !== 'PATH'));
+  const opts = {encoding: 'utf-8', timeout: 30000, windowsHide: true, env: persist == null ? env : {...base, Path: persist}};
+  const cmd = spawnSync(line, {...opts, shell: true});
+  const ps = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(line, 'utf16le').toString('base64')], opts);
+  return [['cmd.exe', want(cmd)], ['PowerShell', want(ps)]];
+}
+
+export function doctor({home = os.homedir(), agents, platform = process.platform, env = process.env, probe, readReg} = {}) {
   if (agents) checkAgents(agents);
   const p = paths(home);
   const lines = [];
@@ -228,18 +302,27 @@ export function doctor({home = os.homedir(), agents} = {}) {
   };
   const traced = ALL_AGENTS.filter((a) => isInstalled(p, a) || hasRules(a));
   const targets = agents || (traced.length ? traced : ALL_AGENTS);
-  const nodeOk = (f) => {
-    const m = /"([^"]+)" "[^"]*doc-kit\.mjs"/.exec(fs.existsSync(f) ? fs.readFileSync(f, 'utf-8').replace(/\\"/g, '"') : '');
-    return !m || fs.existsSync(m[1]);
-  };
+  // 따옴표 경로는 그 파일이 있는지, 맨 node는 PATH에서 찾히는지 본다
+  const nodeOk = (cmds) =>
+    cmds.every((c) => {
+      const m = /^"([^"]+)"/.exec(c);
+      if (m) return fs.existsSync(m[1]);
+      return !/^node\s/.test(c) || !!pathNode({platform, env, probe, readReg});
+    });
   for (const a of targets) {
     const f = hookFile(p, a);
     say(isSkill(skillDir(p, a)), `${AGENT_NAMES[a]} 스킬 ${skillDir(p, a)}`);
     const hooks = hooksOf(p, a);
     const missing = HOOK_EVENTS[a].filter((e) => !hasOurs(hooks[e]));
-    const lost = nodeOk(f) ? '' : ', Node 경로 없음';
+    const lost = nodeOk(ourCommands(hooks)) ? '' : ', Node 경로 없음';
     say(!missing.length && !lost, `${AGENT_NAMES[a]} 훅 ${f}${missing.length ? ` (없음: ${missing.join(', ')})` : ''}${lost}`);
     say(hasRules(a), `${AGENT_NAMES[a]} 지침 ${instructionFile(p, a)}`);
+  }
+  if (platform === 'win32') {
+    const cmds = targets.flatMap((a) => ourCommands(hooksOf(p, a)));
+    if (cmds.some((c) => c.startsWith('"'))) say(null, '영구 PATH(시스템·사용자 환경 변수)에서 Node 22 이상의 node.exe를 찾지 못해 훅 명령이 따옴표 경로로 시작합니다. PowerShell로 훅을 돌리는 에이전트에서는 훅이 실패할 수 있습니다. 환경 변수 Path에 node를 넣고 install을 다시 실행하세요');
+    const prefix = cmds.map((c) => /^.*?doc-kit\.mjs"/.exec(c)?.[0]).find(Boolean);
+    if (prefix && fs.existsSync(p.bin)) for (const [shell, ok] of smoke(prefix, env, persistentPath({env, readReg}))) say(ok, `훅 명령 시험(${shell}): ${prefix}`);
   }
   if (targets.includes('codex')) {
     const conf = fs.existsSync(p.codexConfig) ? fs.readFileSync(p.codexConfig, 'utf-8') : '';

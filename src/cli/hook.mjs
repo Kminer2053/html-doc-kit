@@ -301,6 +301,16 @@ function htmlTree(root) {
   return {rels: out, cut};
 }
 
+// Git Bash(MSYS) 경로를 윈도 경로로 바꾼다. /c/... 는 C:\..., /tmp 는 사용자 임시 폴더다. 윈도가 아니면 그대로 둔다
+export function fromMsys(s, {platform = process.platform, tmp = os.tmpdir()} = {}) {
+  if (platform !== 'win32' || typeof s !== 'string') return s;
+  const d = /^\/([A-Za-z])(?=\/|$)(.*)$/s.exec(s);
+  if (d) return path.win32.normalize(`${d[1].toUpperCase()}:\\${d[2]}`);
+  const t = /^\/tmp(?=\/|$)(.*)$/s.exec(s);
+  if (t) return path.win32.join(tmp, t[1]);
+  return s;
+}
+
 // 셸 명령이 쓴 HTML을 찾는다. 위치를 알 수 없는 쓰기는 unknown으로, 출력 파일인지 모르는 것은 maybe로 돌려준다.
 // wrote: 리디렉션·tee처럼 무엇이든 파일에 쓴 흔적
 function readShell(cmd, cwd) {
@@ -315,7 +325,10 @@ function readShell(cmd, cwd) {
     if (!unresolved) s = s.replace(/^~(?=\/|$)/, home);
     return {s, unresolved};
   };
-  const abs = (s) => (path.isAbsolute(s) ? path.normalize(s) : dir ? path.resolve(dir, s) : null);
+  const abs = (raw) => {
+    const s = fromMsys(raw);
+    return path.isAbsolute(s) ? path.normalize(s) : dir ? path.resolve(dir, s) : null;
+  };
   const addFile = (w) => {
     const {s, unresolved} = expand(w);
     if (!isHtml(s)) return;
@@ -473,16 +486,383 @@ function readShell(cmd, cwd) {
   return out;
 }
 
+// PowerShell 명령을 단순 명령과 낱말로 나눈다. 홑따옴표('' 이스케이프), 겹따옴표(` 이스케이프), 여기 문자열(@' '@)을 처리하고 \는 글자로 둔다
+const PS_SEP = '\u0002'; // 쉼표로 이은 값들의 경계
+const PS_UNRES = '\u0003'; // 괄호 식처럼 값을 알 수 없는 부분
+function psCommands(src) {
+  const cmds = [];
+  let cur = [];
+  let word = null;
+  const flush = () => {
+    if (word !== null) cur.push(word);
+    word = null;
+  };
+  const end = () => {
+    flush();
+    if (cur.length) cmds.push(cur);
+    cur = [];
+  };
+  // 여는 괄호에 짝이 맞는 닫는 괄호의 위치. 따옴표 안의 괄호는 세지 않는다
+  const close = (i) => {
+    let depth = 0;
+    for (let j = i; j < src.length; j++) {
+      const c = src[j];
+      if (c === "'") j = src.indexOf("'", j + 1) < 0 ? src.length : src.indexOf("'", j + 1);
+      else if (c === '"') {
+        for (j++; j < src.length && src[j] !== '"'; j++) if (src[j] === '`') j++;
+      } else if (c === '`') j++;
+      else if (c === '(') depth++;
+      else if (c === ')' && --depth === 0) return j;
+    }
+    return src.length;
+  };
+  for (let i = 0; i < src.length; i++) {
+    const c = src[i];
+    if (c === '@' && (src[i + 1] === "'" || src[i + 1] === '"') && /^[ \t]*\r?\n/.test(src.slice(i + 2, i + 40))) {
+      const q = src[i + 1];
+      const nl = src.indexOf('\n', i + 2);
+      const stop = src.indexOf(`\n${q}@`, nl);
+      const body = src.slice(nl + 1, stop < 0 ? src.length : stop).replace(/\r$/, '');
+      word = (word ?? '') + (q === "'" ? body.replaceAll('$', LITERAL_DOLLAR) : body);
+      i = stop < 0 ? src.length : stop + 2;
+    } else if (c === "'") {
+      let s = '';
+      for (i++; i < src.length; i++) {
+        if (src[i] !== "'") s += src[i];
+        else if (src[i + 1] === "'") (s += "'"), i++;
+        else break;
+      }
+      word = (word ?? '') + s.replaceAll('$', LITERAL_DOLLAR);
+    } else if (c === '"') {
+      let s = '';
+      for (i++; i < src.length; i++) {
+        if (src[i] === '`') {
+          i++;
+          s += src[i] === '$' ? LITERAL_DOLLAR : src[i] ?? '';
+        } else if (src[i] === '"') {
+          if (src[i + 1] !== '"') break;
+          s += '"';
+          i++;
+        } else if (src[i] === '$' && src[i + 1] === '(') {
+          const j = close(i + 1);
+          s += PS_UNRES + src.slice(i, j + 1);
+          i = j;
+        } else s += src[i];
+      }
+      word = (word ?? '') + s;
+    } else if (c === '`') {
+      i++;
+      if (src[i] === '\r' && src[i + 1] === '\n') i++;
+      if (src[i] !== '\n') word = (word ?? '') + (src[i] === '$' ? LITERAL_DOLLAR : src[i] ?? '');
+    } else if (c === '\n' || c === ';' || c === '|' || c === '{' || c === '}') end();
+    else if (c === ' ' || c === '\t' || c === '\r') flush();
+    else if (c === ',') {
+      // a.html, b.html 은 값 하나(배열)다
+      if (word === null && typeof cur.at(-1) === 'string') word = cur.pop();
+      word = (word ?? '') + PS_SEP;
+      while (/[ \t]/.test(src[i + 1] || '')) i++;
+    } else if (c === '&') {
+      // && 는 명령의 끝, & 하나는 호출 연산자
+      if (src[i + 1] === '&') (end(), i++);
+      else flush();
+    } else if (c === '>') {
+      if (word !== null && /^[\d*]$/.test(word)) word = null; // 2> *> 의 2 *
+      flush();
+      if (src[i + 1] === '>') i++;
+      if (src[i + 1] === '&') {
+        i++;
+        while (/\d/.test(src[i + 1] || '')) i++; // 2>&1
+      } else cur.push(REDIR);
+    } else if (c === '<' && src[i + 1] === '#') {
+      const j = src.indexOf('#>', i + 2);
+      i = j < 0 ? src.length : j + 1;
+    } else if (c === '#' && word === null) {
+      const nl = src.indexOf('\n', i);
+      i = (nl < 0 ? src.length : nl) - 1;
+    } else if ((c === '$' || c === '@') && src[i + 1] === '(') {
+      // 식의 값은 알 수 없다. 안의 명령은 따로 읽는다
+      const j = close(i + 1);
+      cmds.push(...psCommands(src.slice(i + 2, j)));
+      word = (word ?? '') + PS_UNRES + src.slice(i, j + 1);
+      i = j;
+    } else if (c === '$' && src[i + 1] === '{') {
+      const j = src.indexOf('}', i);
+      word = (word ?? '') + src.slice(i, j < 0 ? src.length : j + 1);
+      i = j < 0 ? src.length : j;
+    } else if (c === '@' && src[i + 1] === '{') continue;
+    else if (c === '(') {
+      const j = close(i);
+      const inner = src.slice(i + 1, j);
+      if (word === null) {
+        // (Get-Content a) 같은 묶음. 안의 명령은 따로 읽는다
+        cmds.push(...psCommands(inner));
+        word = PS_UNRES + src.slice(i, j + 1);
+      } else {
+        // [IO.File]::WriteAllText(...) 같은 메서드 호출. 인자를 이 명령의 낱말로 넣는다
+        flush();
+        cur.call = true;
+        // 마지막이 인자 목록이고, 그 앞은 인자 안 괄호 식의 명령이다
+        const parts = psCommands(inner);
+        const args = parts.pop() || [];
+        cmds.push(...parts);
+        cur.push(...args.filter((w) => typeof w === 'string').flatMap((w) => w.split(PS_SEP)).filter(Boolean));
+      }
+      i = j;
+    } else word = (word ?? '') + c;
+  }
+  end();
+  return cmds;
+}
+
+// 파일을 쓰지 않는 cmdlet과 별칭
+const PS_READ = new Set(['get-content', 'gc', 'cat', 'type', 'get-childitem', 'gci', 'ls', 'dir', 'select-string', 'sls', 'test-path', 'get-item', 'gi', 'write-output', 'echo', 'write', 'write-host', 'resolve-path', 'rvpa', 'get-location', 'gl', 'pwd', 'get-date', 'get-command', 'gcm', 'get-help', 'help', 'measure-object', 'measure', 'select-object', 'select', 'where-object', 'where', '?', 'foreach-object', 'foreach', '%', 'sort-object', 'sort', 'format-table', 'ft', 'format-list', 'fl', 'out-string', 'out-host', 'out-null', 'convertto-json', 'convertfrom-json', 'convertto-html', 'get-process', 'get-filehash', 'get-itemproperty', 'join-path', 'split-path', 'write-verbose', 'write-warning', 'write-error', 'get-variable', 'get-member', 'gm', 'compare-object', 'group-object', 'start-sleep', 'sleep']);
+const PS_KEYWORDS = new Set(['if', 'elseif', 'else', 'foreach', 'for', 'while', 'do', 'until', 'try', 'catch', 'finally', 'switch', 'function', 'filter', 'param', 'begin', 'process', 'end', 'return', 'throw', 'break', 'continue', 'trap', 'exit', '.']);
+const PS_WRITE = new Set(['set-content', 'sc', 'add-content', 'ac', 'out-file', 'tee-object', 'tee', 'new-item', 'ni']);
+const PS_COPY = new Set(['copy-item', 'copy', 'cp', 'cpi']);
+const PS_MOVE = new Set(['move-item', 'move', 'mv', 'mi']);
+const PS_REMOVE = new Set(['remove-item', 'del', 'rm', 'ri', 'erase', 'rd', 'rmdir']);
+const PS_CD = new Set(['set-location', 'cd', 'sl', 'chdir', 'push-location', 'pushd']);
+const PS_PATHS = ['path', 'literalpath', 'pspath', 'lp', 'filepath'];
+// 값을 받지 않는 스위치. 값 매개변수와 앞부분이 겹치는 줄임은 값으로 본다
+const PS_SWITCH = ['force', 'nonewline', 'passthru', 'whatif', 'confirm', 'asbytestream', 'append', 'noclobber', 'recurse', 'container', 'verbose', 'debug'];
+const PS_VALUE = [...PS_PATHS, 'destination', 'name', 'value', 'encoding', 'itemtype', 'type', 'include', 'exclude', 'filter', 'credential', 'stream', 'width', 'inputobject', 'variable', 'delimiter', 'target', 'erroraction'];
+const isPsCmdlet = (w) => /^[a-z]+-[a-z]+$/i.test(w);
+// 동사로 보아 파일을 쓰지 않는 cmdlet. 출력 파일 매개변수가 있으면 쓰기일 수 있다
+const PS_READ_VERBS = new Set(['get', 'test', 'find', 'show', 'measure', 'select', 'format', 'resolve', 'compare', 'convertfrom', 'read', 'search', 'wait']);
+const PS_READ_WRITES = new Set(['write-host', 'write-output', 'write-verbose', 'write-information', 'write-debug', 'write-progress', 'write-warning', 'write-error']);
+const PS_OUT_PARAMS = ['outfile', 'outputfile', 'outpath', 'outputpath', 'filepath', 'destination'];
+// [IO.File]의 쓰기 메서드와 StreamWriter. 첫 인자가 쓰는 파일이다
+const PS_NET_WRITE = /^\[(?:System\.)?IO\.(?:File\]::(?:WriteAllText|WriteAllLines|WriteAllBytes|AppendAllText|AppendAllLines|Create|CreateText|OpenWrite)|StreamWriter\]::new)$/i;
+const PS_STREAMWRITER = /^(?:System\.)?IO\.StreamWriter$/i;
+const psLike = (w) => isPsCmdlet(w) || [PS_READ, PS_WRITE, PS_COPY, PS_MOVE, PS_REMOVE, PS_CD].some((set) => set.has(w.toLowerCase()));
+// 다른 셸 도구로 온 명령이 PowerShell로 보이는지
+export const looksPowerShell = (cmd) =>
+  /(?:^|[\s;|({])(?:Set-Content|Add-Content|Out-File|New-Item|Copy-Item|Move-Item|Remove-Item|Tee-Object|Set-Location)\b|\$env:|\[(?:System\.)?IO\.(?:File|StreamWriter)\]::|New-Object\s+(?:-TypeName\s+)?(?:System\.)?IO\.StreamWriter\b/i.test(cmd) ||
+  // 별칭은 명령 자리에 온 낱말만 본다
+  /(?:^|[\n;|&({])[ \t]*(?:sc|ni|ac)[ \t]+\S/i.test(cmd);
+
+// PowerShell 명령이 쓴 HTML을 찾는다. readShell과 같은 모양을 돌려준다
+export function readPowerShell(cmd, cwd) {
+  const home = HOME();
+  const out = {written: new Set(), removed: new Set(), unknown: new Set(), maybe: new Set(), notes: new Set(), ran: false, wrote: false};
+  const vars = {};
+  let dir = cwd;
+  const lookup = (name) => {
+    const n = name.toLowerCase();
+    if (Object.hasOwn(vars, n)) return vars[n];
+    if (n === 'home' || n === 'env:userprofile' || n === 'env:home') return home;
+    if (n === 'env:temp' || n === 'env:tmp') return os.tmpdir();
+    if (n === 'pwd' && dir) return dir;
+  };
+  const expand = (w) => {
+    let s = w.replace(/\$(?:\{([^}]+)\}|((?:env:)?\w+))/gi, (all, a, b) => lookup(a ?? b) ?? all);
+    const unresolved = s.includes('$') || s.includes(PS_UNRES);
+    s = s.replaceAll(LITERAL_DOLLAR, '$').replaceAll(PS_UNRES, '').replace(/^(?:[\w.]+\\)?FileSystem::/i, '');
+    if (!unresolved) s = s.replace(/^~(?=[\\/]|$)/, home);
+    return {s, unresolved};
+  };
+  const abs = (s) => (path.isAbsolute(s) ? path.normalize(s) : dir ? path.resolve(dir, s) : null);
+  const vals = (w) => (typeof w === 'string' ? w.split(PS_SEP).filter(Boolean) : []);
+  const addFile = (w) => {
+    const {s, unresolved} = expand(w);
+    if (!isHtml(s) && !(unresolved && /\.html?\b/i.test(s))) return;
+    const p = unresolved ? null : abs(s);
+    if (p) out.written.add(p);
+    else out.unknown.add(s);
+  };
+  // 쓰기 명령의 대상. 값을 모르는 경로는 HTML이 아니라고 확인되지 않으면 위치 미상으로 둔다
+  const addTarget = (w) => {
+    const {s, unresolved} = expand(w);
+    if (unresolved && !/\.html?\b/i.test(s) && path.extname(s)) return;
+    addFile(w);
+    if (unresolved && !/\.html?\b/i.test(s)) out.unknown.add(s);
+  };
+  // 무엇을 하는지 모르는 명령에 나온 HTML은 확인 필요로만 알린다
+  const htmlWords = (a) => {
+    for (const w of a.flatMap(vals)) {
+      const {s, unresolved} = expand(w.replace(/^-[A-Za-z][\w-]*:/, ''));
+      if (!isHtml(s)) continue;
+      if (unresolved || !abs(s)) out.unknown.add(s);
+      else out.maybe.add(abs(s));
+    }
+  };
+  const params = (a) => {
+    const named = {};
+    const pos = [];
+    for (let i = 1; i < a.length; i++) {
+      const m = /^-([A-Za-z][\w-]*)(?::(.*))?$/s.exec(a[i]);
+      if (!m) {
+        pos.push(a[i]);
+        continue;
+      }
+      const n = m[1].toLowerCase();
+      if (m[2] !== undefined) named[n] = m[2];
+      else if (PS_SWITCH.some((s) => s.startsWith(n)) && !PS_VALUE.some((v) => v.startsWith(n))) named[n] = true;
+      else if (i + 1 < a.length) named[n] = a[++i];
+    }
+    const pick = (names) => names.map((n) => named[n]).find((v) => typeof v === 'string');
+    return {named, pos, pick};
+  };
+  const run = (a, call) => {
+    // $x = 값 은 변수로 기억한다. 오른쪽이 명령이면 그 명령을 읽는다
+    const asg = /^\$(\w+)(=(.*))?$/s.exec(a[0]);
+    if (asg && (asg[2] !== undefined || /^[-+*/]?=$/.test(a[1] || ''))) {
+      const name = asg[1].toLowerCase();
+      const rest = asg[2] !== undefined ? [asg[3], ...a.slice(1)].filter((w) => w !== '') : a.slice(2);
+      // 값을 알 수 없으면 모르는 변수로 표시해 뒤의 쓰기를 위치 미상으로 돌린다
+      vars[name] = PS_UNRES + '$' + asg[1];
+      if (rest.length === 1 && !psLike(rest[0]) && !call && a[1] !== '+=') {
+        const v = expand(rest[0]);
+        if (!v.unresolved) vars[name] = v.s;
+      } else if (/^join-path$/i.test(rest[0] || '') && a[1] !== '+=') {
+        // Join-Path a b 는 두 부분을 알면 이어 붙인다
+        const {pos, pick} = params(rest);
+        const parts = [pick(['path']) ?? pos.shift(), pick(['childpath']) ?? pos.shift()].map((w) => (typeof w === 'string' && !w.includes(PS_SEP) ? expand(w) : null));
+        if (parts.every((v) => v && !v.unresolved)) vars[name] = path.join(parts[0].s, parts[1].s);
+      } else if (rest.length) run(rest, call);
+      return;
+    }
+    let k = 0;
+    while (k < a.length && PS_KEYWORDS.has(a[k].toLowerCase())) k++;
+    if (k) a = a.slice(k).filter((w, i) => i > 0 || !w.startsWith(PS_UNRES));
+    if (!a.length) return;
+    const name = a[0].toLowerCase();
+    const {named, pos, pick} = params(a);
+    if (PS_CD.has(name)) {
+      const w = pick(PS_PATHS) ?? pos[0];
+      if (w === undefined) return;
+      const {s, unresolved} = expand(w);
+      dir = unresolved || s === '-' ? null : abs(s);
+      return;
+    }
+    if (name === 'pop-location' || name === 'popd') {
+      dir = null;
+      return;
+    }
+    if (PS_READ.has(name)) return;
+    if (PS_NET_WRITE.test(a[0]) || (name === 'new-object' && PS_STREAMWRITER.test(pick(['typename']) ?? pos[0] ?? ''))) {
+      out.ran = true;
+      out.wrote = true;
+      const first = name === 'new-object' ? (typeof named.argumentlist === 'string' ? named.argumentlist : pos[named.typename === undefined ? 1 : 0]) : a[1];
+      const w = vals(first)[0];
+      if (w === undefined) out.unknown.add(a.slice(0, 2).join(' '));
+      else addTarget(w);
+      return;
+    }
+    if (isPsCmdlet(name) && (PS_READ_VERBS.has(name.split('-')[0]) || PS_READ_WRITES.has(name)) && !PS_OUT_PARAMS.some((n) => n in named)) {
+      // 읽기 동사. 쓰기 턴으로 치지 않고 HTML 낱말만 확인 필요로 알린다
+      htmlWords(a.slice(1));
+      return;
+    }
+    if (/^[$[@\d]|^\u0003/.test(a[0])) {
+      // 식. 메서드 호출([IO.File]::WriteAllText 등)이 있으면 쓰기일 수 있다
+      if (call) (out.ran = true), htmlWords(a);
+      return;
+    }
+    if (PS_WRITE.has(name)) {
+      out.ran = true;
+      out.wrote = true;
+      const target = pick(PS_PATHS) ?? pos[0];
+      if ((name === 'new-item' || name === 'ni') && typeof named.name === 'string') vals(target ?? '.').forEach((p) => addFile(path.join(p, named.name)));
+      else if (name === 'new-item' || name === 'ni') vals(target).forEach(addFile);
+      else vals(target).forEach(addTarget);
+      return;
+    }
+    if (PS_REMOVE.has(name)) {
+      out.ran = true;
+      for (const w of vals(pick(PS_PATHS) ?? pos[0])) {
+        const {s, unresolved} = expand(w);
+        const p = !unresolved && abs(s);
+        if (p) out.removed.add(p);
+      }
+      return;
+    }
+    if (PS_COPY.has(name) || PS_MOVE.has(name)) {
+      out.ran = true;
+      const move = PS_MOVE.has(name);
+      const literal = pick(['literalpath', 'lp', 'pspath']) !== undefined;
+      const srcW = pick(PS_PATHS) ?? pos.shift();
+      const destW = typeof named.destination === 'string' ? named.destination : pos.shift();
+      const recurse = move || Object.keys(named).some((n) => 'recurse'.startsWith(n));
+      const d = destW === undefined ? {s: dir ?? '', unresolved: !dir} : expand(destW);
+      const to = d.unresolved ? null : abs(d.s);
+      const toDir = !!to && (destW === undefined || /[\\/]$/.test(d.s) || !!statOf(to)?.isDirectory());
+      const tree = (srcDir, root) => {
+        const t = htmlTree(srcDir);
+        t.rels.forEach((r) => out.written.add(path.join(root, r)));
+        if (t.cut) out.notes.add(`${srcDir} 안의 HTML은 ${TREE_MAX}개까지만 기록했습니다. 옮긴 HTML이 더 있으면 ensure를 실행하세요`);
+      };
+      for (const w of vals(srcW)) {
+        const {s, unresolved} = expand(w);
+        const from = !unresolved && abs(s);
+        if (!toDir) {
+          if (isHtml(d.s)) to ? out.written.add(to) : out.unknown.add(d.s);
+          else if (!to && isHtml(s)) out.unknown.add(`${a[0]} ${s} → ${d.s}`);
+          else if (to && recurse && (move ? statOf(to)?.isDirectory() : from && statOf(from)?.isDirectory())) tree(move ? to : from, to);
+        } else if (unresolved) {
+          if (isHtml(s) || hasGlob(s)) out.unknown.add(`${a[0]} ${s} → ${d.s}`);
+        } else if (hasGlob(s) && !literal) {
+          const names = expandGlob(from);
+          if (names === null || (!names.length && move)) out.unknown.add(`${a[0]} ${s} → ${d.s}`);
+          for (const n of names || []) {
+            const st = statOf(n);
+            const into = path.join(to, path.basename(n));
+            if (st?.isFile() && isHtml(n)) out.written.add(into);
+            else if (st?.isDirectory() && recurse) tree(n, into);
+          }
+        } else if (isHtml(s)) out.written.add(path.join(to, path.basename(s)));
+        else if (recurse) {
+          // 옮긴 뒤에는 원본이 없으니 대상 아래 같은 이름 폴더를 본다
+          const into = path.join(to, path.basename(s));
+          if (move ? statOf(into)?.isDirectory() : statOf(from)?.isDirectory()) tree(move ? into : from, into);
+        }
+        if (move && from && !hasGlob(s)) out.removed.add(from);
+      }
+      return;
+    }
+    if (isPsCmdlet(a[0])) {
+      // 모르는 cmdlet은 쓰기일 수 있다
+      out.ran = true;
+      htmlWords(a.slice(1));
+      return;
+    }
+    // 외부 프로그램(node, pandoc 등)은 셸 읽기에 맡긴다
+    const words = a.map((w) => {
+      const v = w.replace(/\$(?:\{([^}]+)\}|((?:env:)?\w+))/gi, (all, x, y) => lookup(x ?? y) ?? all).replaceAll(PS_SEP, ',');
+      return v.includes(PS_UNRES) ? '$' + v.replaceAll(PS_UNRES, '') : v;
+    });
+    const r = readShell(words.map((w) => `"${w.replace(/["\\`]/g, '\\$&')}"`).join(' '), dir);
+    for (const key of ['written', 'removed', 'unknown', 'maybe', 'notes']) r[key].forEach((v) => out[key].add(v));
+    out.ran ||= r.ran;
+    out.wrote ||= r.wrote;
+  };
+  for (const words of psCommands(cmd)) {
+    const a = [];
+    for (let i = 0; i < words.length; i++) {
+      if (words[i] === REDIR) {
+        if (typeof words[i + 1] === 'string') {
+          if (!/^\$null$/i.test(words[i + 1])) out.wrote = true;
+          addFile(words[++i]);
+        }
+      } else a.push(words[i]);
+    }
+    if (a.length) run(a, !!words.call);
+  }
+  return out;
+}
+
 // 도구 입력에서 HTML 쓰기를 꺼낸다(편집 도구, apply_patch, 셸 명령)
 // 쓰지 않는 도구. 설치한 훅은 쓰기 도구에만 걸리지만, 다른 설정에서 이런 도구가 와도 쓰기로 치지 않는다
 const READ_TOOLS = /^(?:Read|Glob|Grep|LS|NotebookRead|WebFetch|WebSearch|TodoWrite|TodoRead|Task|view|read_file|list_files|search)$/;
 // active: 이번 도구 사용이 쓰기였는지(쓰기 도구의 경로, 패치, 읽기 전용이 아닌 셸 명령, 리디렉션). 쓰기가 하나도 없는 턴은 작업 폴더를 훑어 고치지 않는다
-function effectsOf(i) {
+// PowerShell 도구는 PowerShell로 읽는다. 윈도에서 다른 셸 도구로 온 PowerShell 명령은 두 방식으로 읽어 합친다
+export function effectsOf(i, platform = process.platform) {
   const cwd = cwdOf(i);
   const out = {written: new Set(), removed: new Set(), unknown: new Set(), maybe: new Set(), notes: new Set(), ran: false, active: false};
   const add = (p) => {
-    if (typeof p === 'string' && isHtml(p)) out.written.add(path.resolve(cwd, p.replace(/^~(?=\/)/, HOME())));
+    if (typeof p === 'string' && isHtml(p)) out.written.add(path.resolve(cwd, p.replace(platform === 'win32' ? /^~(?=[\/\\])/ : /^~(?=\/)/, HOME())));
   };
+  const powershell = /^powershell$/i.test(i.tool_name || '');
   const t = i.tool_input || i.input || {};
   const readTool = READ_TOOLS.test(i.tool_name || '');
   const paths = [i.file_path, t.file_path, t.path, t.notebook_path].filter((p) => typeof p === 'string' && p);
@@ -497,10 +877,15 @@ function effectsOf(i) {
       for (const m of text.matchAll(/\*\*\* (?:Add File|Update File|Move to): (.+)/g)) add(m[1].trim());
       continue;
     }
-    const r = readShell(text, cwd);
-    for (const k of ['written', 'removed', 'unknown', 'maybe', 'notes']) r[k].forEach((v) => out[k].add(v));
-    out.ran ||= r.ran;
-    out.active ||= r.ran || r.wrote || r.written.size > 0;
+    const readers = powershell ? [readPowerShell] : platform === 'win32' && looksPowerShell(text) ? [readShell, readPowerShell] : [readShell];
+    for (const read of readers) {
+      const r = read(text, cwd);
+      // 둘로 읽을 때 셸 읽기는 \를 이스케이프로 보아 경로가 틀릴 수 있다. 실제로 있는 파일만 받는다
+      if (readers.length > 1 && read === readShell) for (const p of r.written) if (!statOf(p)) r.written.delete(p);
+      for (const k of ['written', 'removed', 'unknown', 'maybe', 'notes']) r[k].forEach((v) => out[k].add(v));
+      out.ran ||= r.ran;
+      out.active ||= r.ran || r.wrote || r.written.size > 0;
+    }
   }
   return out;
 }

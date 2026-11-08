@@ -38,7 +38,9 @@ html-doc-kit은 macOS에서만 확인했습니다. 아래 프롬프트를 Window
 4. 실제 에이전트 시험
 - 이 PC에 설치되어 로그인된 에이전트 CLI만 써. 없거나 로그인이 안 되어 있으면 건너뛰고 그렇게 적어.
 - 에이전트마다 빈 폴더 %TEMP%\dk-win\agent-<이름>을 만들고, 새 세션으로 "이번 분기 실적 보고서를 HTML로 만들어줘. 내용은 예시로 채워." 한 가지를 시켜.
-  - Claude Code: claude -p "<요청>" --permission-mode acceptEdits
+  - Claude Code: claude -p "<요청>" --permission-mode acceptEdits --add-dir "%USERPROFILE%\.claude\skills\html-doc-kit" --allowedTools "Bash(node:*)" "PowerShell(node:*)"
+    (acceptEdits만으로는 node 실행과 작업 폴더 밖 스킬 참고 문서 읽기가 막혀 HTML을 만들지 못한다. 허용은 이 두 가지로만 한정한다)
+  - 훅 복구도 보려면 새 빈 폴더에서 같은 옵션으로 "이번 분기 실적 보고서를 HTML 파일 하나로 직접 작성해줘. html-doc-kit은 쓰지 말고 Write 도구로 바로 써."와 "같은 보고서를 PowerShell의 Set-Content로 HTML 파일에 써줘. html-doc-kit은 쓰지 마."를 한 번씩 시켜 본다
   - Codex: codex exec -s workspace-write --skip-git-repo-check -C <폴더> "<요청>"
   - Cursor: agent -p "<요청>" --output-format text --workspace <폴더> --trust (--trust는 이 시험 폴더에만 써)
 - 끝나면 폴더에 생긴 HTML마다 check를 실행해 결과를 기록해.

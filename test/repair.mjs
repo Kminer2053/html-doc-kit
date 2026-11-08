@@ -19,6 +19,8 @@ const ok = (name, cond, extra = '') => {
   console.log(`${cond ? 'PASS' : 'FAIL'} ${name}${extra ? ' → ' + extra : ''}`);
 };
 const run = (...args) => spawnSync('node', [CLI, ...args], {encoding: 'utf-8'});
+// 훅 출력은 JSON이라 Windows 경로의 \는 \\로 찍힌다. 그대로든 JSON으로 적혔든 찾는다
+const says = (out, text) => out.includes(text) || out.includes(JSON.stringify(text).slice(1, -1));
 const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEAQH/7yMK/gAAAABJRU5ErkJggg==';
 const WORD = '본문보존확인';
 const IMG = `<img src="${png}" alt="pic">`;
@@ -497,12 +499,16 @@ for (const [name, css, html] of [
   const r = run('ensure', slow);
   // 뷰어는 그림을 5초까지만 기다리므로 응답 없는 그림 서버가 있어도 완성된다
   ok('42 응답 없는 그림: 상한 뒤 완성되고 스타일 유지', r.status === 0 && r.stdout.includes('완성') && !r.stdout.includes('버리고') && has(slow, '80px'), r.stdout + r.stderr);
+  // 가짜 브라우저는 sh 스크립트라 Windows에서는 띄울 수 없다
+  const win = process.platform === 'win32';
+  if (win) console.log('SKIP 42 준비 시간 초과 / 9 띄운 뒤 브라우저가 죽으면 / 9 브라우저를 못 띄우면: sh 가짜 브라우저를 Windows에서 못 띄움');
   const chrome = findChrome();
   const wrapper = ef('chrome-dies.sh');
   fs.writeFileSync(wrapper, `#!/bin/sh\n"${chrome}" "$@" &\np=$!\nsleep 2\nkill -9 $p\n`, {mode: 0o755});
   // 스크립트가 꺼진 브라우저에서는 준비 표시가 서지 않는다. 미실행으로 알리고 스타일을 둔다
   const noScript = ef('chrome-noscript.sh');
   fs.writeFileSync(noScript, `#!/bin/sh\nexec "${chrome}" --blink-settings=scriptEnabled=false "$@"\n`, {mode: 0o755});
+  if (!win) {
   const never = ef('never.html');
   fs.writeFileSync(never, plain('<style>h1{font-size:80px}</style>', `<h1>${WORD}</h1><p>글</p>`));
   const n = spawnSync('node', [CLI, 'ensure', never], {encoding: 'utf-8', env: {...process.env, DOC_KIT_CHROME: noScript}});
@@ -511,14 +517,17 @@ for (const [name, css, html] of [
   fs.writeFileSync(dies, doc);
   const d = spawnSync('node', [CLI, 'ensure', dies], {encoding: 'utf-8', env: {...process.env, DOC_KIT_CHROME: wrapper}});
   ok('9 띄운 뒤 브라우저가 죽으면 fail, 스타일은 유지', d.status === 1 && d.stderr.includes('미완성') && !d.stdout.includes('버리고') && has(dies, '80px'), d.stdout + d.stderr);
+  }
   server.close();
   // 띄우기 실패만 미실행이다. 문서 탓이 아니므로 완성 판정은 C1~C5로 하고 스타일도 그대로 둔다
   const noStart = ef('chrome-no-start.sh');
   fs.writeFileSync(noStart, '#!/bin/sh\nexit 1\n', {mode: 0o755});
+  if (!win) {
   const quiet = ef('nostart.html');
   fs.writeFileSync(quiet, doc);
   const q = spawnSync('node', [CLI, 'ensure', quiet], {encoding: 'utf-8', env: {...process.env, DOC_KIT_CHROME: noStart}});
   ok('9 브라우저를 못 띄우면 미실행, 스타일은 유지', q.status === 0 && q.stdout.includes('미실행') && !q.stdout.includes('버리고') && has(quiet, '80px'), q.stdout + q.stderr);
+  }
 }
 // 25: 브라우저 없이도 전체 숨김 CSS는 버린다. 인쇄 전용 규칙은 건드리지 않는다
 {
@@ -635,7 +644,7 @@ fs.writeFileSync(tmpl, plain('', '<p>{% if name %}이름{% endif %}</p>'));
 const outside = path.join(HK, 'outside', 'desk.html');
 fs.mkdirSync(path.dirname(outside), {recursive: true});
 fs.writeFileSync(outside, plain('', `<h1>${WORD}</h1>`));
-hook('claude', 'post', {...sid, tool_name: 'Bash', tool_input: {command: `echo hi > ${outside}`}});
+hook('claude', 'post', {...sid, tool_name: 'Bash', tool_input: {command: `echo hi > "${outside}"`}});
 const before = {react: fs.readFileSync(reactIndex, 'utf-8'), app: fs.readFileSync(appIndex, 'utf-8'), cov: fs.readFileSync(cov, 'utf-8'), tmpl: fs.readFileSync(tmpl, 'utf-8'), scripted: fs.readFileSync(scripted, 'utf-8')};
 const st = hook('claude', 'stop', sid);
 ok('훅: 표식 없는 새 HTML을 끝날 때 입힘', run('check', report).status === 0, st.stdout.slice(0, 100));
@@ -885,7 +894,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     pause(1600);
     s.prompt();
     const out = s.stop();
-    ok('P4 중단된 턴의 마지막 도구 사용 뒤 파일은 그대로 두고 확인 필요로 알림', !hasKit(late) && out.includes(`확인 필요: ${late}`), out);
+    ok('P4 중단된 턴의 마지막 도구 사용 뒤 파일은 그대로 두고 확인 필요로 알림', !hasKit(late) && says(out, `확인 필요: ${late}`), out);
     s.prompt();
     const o2 = s.stop();
     ok('P4 확인 필요 알림은 한 번만', !o2.includes('late.html'), o2);
@@ -910,13 +919,13 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const text = fs.readFileSync(mine, 'utf-8');
     const out = s.stop();
     ok('A8 읽기 명령만 있는 턴에 사용자가 저장한 기존 HTML은 고치지 않음', fs.readFileSync(mine, 'utf-8') === text && !hasKit(mine), out);
-    ok('A8 쓰기 없는 턴에 바뀐 HTML은 확인 필요로 알림', out.includes(`확인 필요: ${mine}`) && out.includes('쓰기 도구나 쓰기 명령이 없었는데'), out);
+    ok('A8 쓰기 없는 턴에 바뀐 HTML은 확인 필요로 알림', says(out, `확인 필요: ${mine}`) && out.includes('쓰기 도구나 쓰기 명령이 없었는데'), out);
     s.prompt();
     const saved = s.put('gap_saved.html');
     s.bash('ls');
     s.prompt();
     const o2 = s.stop();
-    ok('A8 쓰기 없는 미처리 구간도 훑어 고치지 않음', !hasKit(saved) && o2.includes(`확인 필요: ${saved}`), o2);
+    ok('A8 쓰기 없는 미처리 구간도 훑어 고치지 않음', !hasKit(saved) && says(o2, `확인 필요: ${saved}`), o2);
     s.prompt();
     const viaRedir = s.put('redir.html');
     s.bash('echo done > log.txt');
@@ -948,7 +957,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const out = s.stop();
     ok('A1 ls -o, grep -o 뒤의 파일은 쓰기 대상으로 보지 않음', !hasKit(lsF) && !hasKit(grepF) && !out.includes('ls.html') && !out.includes('grep.html'), out);
     ok('A1 node·python 스크립트와 curl의 -o/--output은 고침', hasKit(nodeF) && hasKit(pyF) && hasKit(curlF), out);
-    ok('A1 출력 옵션인지 모르는 프로그램의 -o는 고치지 않고 확인 필요로 알림', !hasKit(odd) && out.includes(`확인 필요: ${odd}`), out);
+    ok('A1 출력 옵션인지 모르는 프로그램의 -o는 고치지 않고 확인 필요로 알림', !hasKit(odd) && says(out, `확인 필요: ${odd}`), out);
   }
 
   // G1·G3·G7: 읽기 전용 프로그램이라도 출력 옵션(tree -o, git diff --output)과 find -exec 안의 명령은 쓰기 대상이다
@@ -1161,7 +1170,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     fs.writeFileSync(dl, body);
     const o2 = s2.stop();
     ok('R3 스크립트 실행만으로는 바탕화면·다운로드의 파일을 고치지 않음', !hasKit(py) && !hasKit(dl));
-    ok('N3 스크립트를 돌린 턴에 바탕화면·다운로드에 생긴 HTML은 확인 필요로 알림', o2.includes(`확인 필요: ${py}`) && o2.includes(`확인 필요: ${dl}`) && o2.includes('사용자 폴더라 그대로'), o2);
+    ok('N3 스크립트를 돌린 턴에 바탕화면·다운로드에 생긴 HTML은 확인 필요로 알림', says(o2, `확인 필요: ${py}`) && says(o2, `확인 필요: ${dl}`) && o2.includes('사용자 폴더라 그대로'), o2);
     // P1: 명령에 폴더 이름이 나와도 바탕화면·다운로드·문서 폴더를 훑어서 고치지 않는다. 직접 쓴 경로만 고친다
     const s2b = session();
     s2b.prompt();
@@ -1171,7 +1180,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const dl2 = path.join(hhome, 'Downloads', 'dl2.html');
     fs.writeFileSync(dl2, body);
     const ob = s2b.stop();
-    ok('P1 명령에 ~/Desktop이 나와도 바탕화면 파일은 고치지 않고 확인 필요로 알림', !hasKit(py2) && !hasKit(dl2) && ob.includes(`확인 필요: ${py2}`), ob);
+    ok('P1 명령에 ~/Desktop이 나와도 바탕화면 파일은 고치지 않고 확인 필요로 알림', !hasKit(py2) && !hasKit(dl2) && says(ob, `확인 필요: ${py2}`), ob);
     const s2c = session();
     s2c.prompt();
     const dl3 = path.join(hhome, 'Downloads', 'dl3.html');
@@ -1191,7 +1200,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     // P1: 읽기만 하는 명령(ls)에 폴더 이름이 나오고, 그 사이 받은 파일
     const s2e = session();
     s2e.prompt();
-    s2e.bash(`ls ${path.join(hhome, 'Downloads')}`);
+    s2e.bash(`ls "${path.join(hhome, 'Downloads')}"`);
     const inv = path.join(hhome, 'Downloads', 'invoice.html');
     fs.writeFileSync(inv, body);
     const oe = s2e.stop();
@@ -1208,7 +1217,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const mineText = fs.readFileSync(mine, 'utf-8');
     s2f.bash('git commit -m "Update Documents section"');
     const of = s2f.stop();
-    ok('P1b 커밋 메시지에 Documents가 나와도 문서 폴더 파일은 그대로 두고 확인 필요로 알림', fs.readFileSync(mine, 'utf-8') === mineText && of.includes(`확인 필요: ${mine}`), of);
+    ok('P1b 커밋 메시지에 Documents가 나와도 문서 폴더 파일은 그대로 두고 확인 필요로 알림', fs.readFileSync(mine, 'utf-8') === mineText && says(of, `확인 필요: ${mine}`), of);
 
     const s3 = session();
     s3.prompt();
@@ -1264,7 +1273,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     const out = s.stop();
     ok('9 브라우저 시험 미실행을 파일마다 알림', out.includes('브라우저 시험 미실행') && out.includes('nopic.html') && out.includes('hid.html'), out);
     ok('19 W1 경고를 훅에서 전달', out.includes('없는그림.png') && out.includes('경고(nopic.html)'), out);
-    ok('43 백업 경로를 알림', /원본: [^"\\]*\.doc-kit\/backup\/nopic\.html\.\d+/.test(out), out);
+    ok('43 백업 경로를 알림', /원본: (?:[^"\\]|\\\\)*\.doc-kit(?:\/|\\\\)backup(?:\/|\\\\)nopic\.html\.\d+/.test(out), out);
 
     const s2 = session();
     s2.prompt();
@@ -1595,7 +1604,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     fs.mkdirSync(path.join(s.dir, '.doc-kit'), {recursive: true});
     const inb = path.join(s.dir, '.doc-kit', 'body.html');
     fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각</p></section>');
-    s.bash(`cat > ${inb}`);
+    s.bash(`cat > "${inb}"`);
     const outp = path.join(s.dir, 'result.html');
     spawnSync('node', [CLI, 'build', inb, '-o', outp, '--no-browser'], {encoding: 'utf-8'});
     const size0 = size(inb);
@@ -1604,7 +1613,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     s.prompt();
     fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각 고침</p></section>');
     fs.utimesSync(inb, new Date(Date.now() + 2000), new Date(Date.now() + 2000));
-    s.bash(`cat > ${inb}`);
+    s.bash(`cat > "${inb}"`);
     const o2 = s.stop();
     ok('28 입력만 고치고 다시 만들지 않으면 알림', o2.includes('반영하지 않았습니다') || o2.includes('아직 없습니다'), o2);
   }
@@ -1670,7 +1679,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     ctl('uninstall', '--agents', 'claude');
     ok('46 마지막 에이전트를 빼면 실행 파일도 지움', !fs.existsSync(binCli) && !fs.existsSync(installedCli) && stopHooks().includes('say done') && !stopHooks().includes('hook claude'), stopHooks());
     const inst = spawnSync('node', [CLI, 'install', '--home', ih2, '--agents', 'claude'], {encoding: 'utf-8'});
-    ok('13 설치 출력에 실측 전 안내', inst.stdout.includes('실측 전'), inst.stdout);
+    ok('13 설치 출력에 확인 범위 안내', inst.stdout.includes('참고: 훅은 macOS의') && inst.stdout.includes('README'), inst.stdout);
   }
 
   // Chrome을 그대로 쓰는 복구 한 건: 끝까지 통과하고 45초를 기다리지 않는다
@@ -1684,6 +1693,34 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     ok('훅: 실제 브라우저로 입히고 알림에 미실행 없음', run('check', f).status === 0 && o.includes('real.html') && !o.includes('미실행'), `${Date.now() - t0}ms ${o}`);
   }
 }
+
+// 브라우저 임시 프로필: 한 번 띄운 뒤 남지 않고, 오래 남은 프로필 모양 폴더만 다음 실행이 치운다
+// 다른 도구가 함께 돌아도 섞이지 않게 이 시험만 쓰는 임시 폴더를 os.tmpdir()로 준다
+if (findChrome()) {
+  const tmp = fs.mkdtempSync(path.join(OUT, 'tmp-'));
+  const env = {...process.env, TMPDIR: tmp, TEMP: tmp, TMP: tmp};
+  const profiles = () => new Set(fs.readdirSync(tmp, {withFileTypes: true}).filter((d) => d.isDirectory() && d.name.startsWith('doc-kit-')).map((d) => d.name));
+  const fake = (name, marker, hoursAgo) => {
+    const d = path.join(tmp, name);
+    fs.mkdirSync(d);
+    if (marker) fs.writeFileSync(path.join(d, marker), '{}');
+    const t = new Date(Date.now() - hoursAgo * 3600000);
+    fs.utimesSync(d, t, t);
+    return d;
+  };
+  const stale = fake('doc-kit-stale1', 'Local State', 2);
+  const fresh = fake('doc-kit-fresh1', 'Local State', 0.1);
+  const other = fake('doc-kit-other1', null, 2);
+  const before = profiles();
+  const f = path.join(OUT, 'profile-clean.html');
+  fs.writeFileSync(f, plain('', BODY));
+  const r = spawnSync('node', [CLI, 'ensure', f], {encoding: 'utf-8', env});
+  const left = [...profiles()].filter((n) => !before.has(n));
+  ok('61 브라우저를 띄운 뒤 임시 프로필이 남지 않음', r.status === 0 && !r.stdout.includes('미실행') && left.length === 0, left.join(', ') + r.stdout + r.stderr);
+  ok('61 한 시간 넘은 프로필 모양 폴더는 치움', !fs.existsSync(stale));
+  ok('61 한 시간 안 된 프로필과 프로필 아닌 doc-kit-* 폴더는 둠', fs.existsSync(fresh) && fs.existsSync(other));
+  fs.rmSync(tmp, {recursive: true, force: true});
+} else console.log('SKIP 61 임시 프로필 정리: Chrome 없음');
 
 console.log(fails ? `\n실패 ${fails}건` : '\n모두 통과');
 process.exit(fails ? 1 : 0);

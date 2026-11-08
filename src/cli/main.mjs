@@ -91,13 +91,16 @@ try {
   } else if (cmd === 'install') {
     console.log(`설치: ${install(o).join(', ')}`);
     doctor(o).forEach((l) => console.log(l));
-    console.log('참고: 세 에이전트에서 훅이 실제로 도는지는 아직 실측 전입니다(보장 아님). 자세한 범위는 README를 보세요');
+    console.log('참고: 훅은 macOS의 Claude Code·Codex·Cursor에서 확인했습니다. Cursor CLI(agent -p)에서는 결과가 ~/.doc-kit/hook.log에만 남습니다. 자세한 범위는 README를 보세요');
   } else if (cmd === 'uninstall') {
     console.log(`제거: ${uninstall(o).join(', ')}`);
   } else if (cmd === 'doctor') {
     const lines = doctor(o);
     lines.forEach((l) => console.log(l));
     process.exitCode = lines.some((l) => l.startsWith('문제')) ? 1 : 0;
+  } else if (cmd === '--version') {
+    // doctor가 훅 명령이 셸에서 도는지 시험할 때 쓴다
+    console.log(VERSION);
   } else if (cmd === 'hook') {
     await hook(pos[0], pos[1]);
   } else {
