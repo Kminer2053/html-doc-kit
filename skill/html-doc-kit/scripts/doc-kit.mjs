@@ -12741,7 +12741,7 @@ var readStdin = () => {
     return {};
   }
 };
-var cwdOf = (i) => i.cwd || i.workspace_roots && i.workspace_roots[0] || process.cwd();
+var cwdOf = (i) => fromMsys(i.cwd || i.workspace_roots && i.workspace_roots[0]) || process.cwd();
 var stateFile = (i) => {
   const key = i.session_id || i.conversation_id || cwdOf(i);
   return path5.join(stateDir(), crypto4.createHash("sha1").update(String(key)).digest("hex").slice(0, 16) + ".json");
@@ -12892,7 +12892,7 @@ function htmlTree(root) {
 }
 function fromMsys(s, { platform = process.platform, tmp = os4.tmpdir() } = {}) {
   if (platform !== "win32" || typeof s !== "string") return s;
-  const d = /^\/([A-Za-z])(?=\/|$)(.*)$/s.exec(s);
+  const d = /^\/([A-Za-z]):?(?=\/|$)(.*)$/s.exec(s);
   if (d) return path5.win32.normalize(`${d[1].toUpperCase()}:\\${d[2]}`);
   const t = /^\/tmp(?=\/|$)(.*)$/s.exec(s);
   if (t) return path5.win32.join(tmp, t[1]);
@@ -13402,7 +13402,7 @@ function effectsOf(i, platform = process.platform) {
   const cwd = cwdOf(i);
   const out = { written: /* @__PURE__ */ new Set(), removed: /* @__PURE__ */ new Set(), unknown: /* @__PURE__ */ new Set(), maybe: /* @__PURE__ */ new Set(), notes: /* @__PURE__ */ new Set(), ran: false, active: false };
   const add = (p) => {
-    if (typeof p === "string" && isHtml(p)) out.written.add(path5.resolve(cwd, p.replace(platform === "win32" ? /^~(?=[\/\\])/ : /^~(?=\/)/, HOME())));
+    if (typeof p === "string" && isHtml(p)) out.written.add(path5.resolve(cwd, fromMsys(p, { platform }).replace(platform === "win32" ? /^~(?=[\/\\])/ : /^~(?=\/)/, HOME())));
   };
   const powershell = /^powershell$/i.test(i.tool_name || "");
   const t = i.tool_input || i.input || {};
