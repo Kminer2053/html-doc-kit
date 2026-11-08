@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {doctor, install, nodeToken, parseRegPath, pathNode, persistentPath, probeNode, uninstall} from '../src/cli/install.mjs';
+import {codexTrusted, doctor, install, nodeToken, parseRegPath, pathNode, persistentPath, probeNode, uninstall} from '../src/cli/install.mjs';
 import {sweepProfiles} from '../src/cli/browser.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -143,6 +143,13 @@ try {
   sweepProfiles({dir: path.join(root, 'no-such-dir')});
   ok('정리: 임시 폴더가 없어도 오류 없음', true);
   ok('정리: 한 시간 넘은 빈 doc-kit-XXXXXX 폴더도 지우고, 새 것과 다른 이름은 둠', !fs.existsSync(emptyOld) && fs.existsSync(emptyFresh) && fs.existsSync(emptyOdd));
+  // W5: Windows Codex의 승인 키는 작은따옴표 리터럴과 역슬래시 경로
+  const winConf = "[hooks.state.'C:\\Users\\USER\\.codex\\hooks.json:post_tool_use:0:0']\r\ntrusted_hash = \"sha256:aa\"\r\n";
+  ok('Codex 승인: Windows 키(작은따옴표·역슬래시, CRLF)를 알아봄', codexTrusted(winConf, 'post_tool_use') && !codexTrusted(winConf, 'stop'));
+  const macConf = '[hooks.state."/Users/a/.codex/hooks.json:stop:0:0"]\ntrusted_hash = "sha256:bb"\n';
+  ok('Codex 승인: macOS 키(큰따옴표·슬래시)도 그대로', codexTrusted(macConf, 'stop') && !codexTrusted(macConf, 'post_tool_use'));
+  ok('Codex 승인: 큰따옴표 안 이중 역슬래시 키도 알아봄', codexTrusted('[hooks.state."C:\\\\Users\\\\U\\\\.codex\\\\hooks.json:stop:0:0"]\ntrusted_hash = "x"', 'stop'));
+  ok('Codex 승인: 따옴표 짝이 안 맞으면 아님', !codexTrusted('[hooks.state."C:/u/.codex/hooks.json:stop:0:0\']\ntrusted_hash = "x"', 'stop'));
 } catch (e) {
   ok('예외 없이 끝남', false, e.stack);
 } finally {

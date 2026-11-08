@@ -269,7 +269,8 @@ export function uninstall({home = os.homedir(), agents = ALL_AGENTS} = {}) {
 
 // Codex 승인 키는 설정 파일 경로:이벤트:번호 꼴이다. 전역 훅 키는 실제 승인으로 아직 확인하지 못했다
 const CODEX_EVENTS = {prompt: 'user_prompt_submit', post: 'post_tool_use', stop: 'stop'};
-const codexTrusted = (conf, event) => new RegExp(`\\[hooks\\.state\\."[^"]*\\.codex/hooks\\.json:${event}:[^"]*"\\]\\s*\\n\\s*trusted_hash`, 'i').test(conf);
+// Windows의 Codex는 키를 작은따옴표 리터럴과 역슬래시 경로로 쓴다('C:\\Users\\...\\.codex\\hooks.json:stop:0:0')
+export const codexTrusted = (conf, event) => new RegExp(`\\[hooks\\.state\\.(["'])[^"'\\n]*\\.codex[\\\\/]+hooks\\.json:${event}:[^"'\\n]*\\1\\]\\s*\\n\\s*trusted_hash`, 'i').test(conf);
 
 // agents를 주지 않으면 설치 흔적이 있는 에이전트를 본다. 흔적이 하나도 없으면 전부 본다
 // 설치된 우리 훅 명령들. 앞부분(node와 실행 파일)이 같은지 보고 시험하는 데 쓴다
@@ -327,7 +328,7 @@ export function doctor({home = os.homedir(), agents, platform = process.platform
   if (targets.includes('codex')) {
     const conf = fs.existsSync(p.codexConfig) ? fs.readFileSync(p.codexConfig, 'utf-8') : '';
     const waiting = Object.entries(CODEX_EVENTS).filter(([, event]) => !codexTrusted(conf, event)).map(([name]) => name);
-    say(waiting.length === 0, waiting.length ? `Codex 훅 승인 필요(${waiting.join(', ')}): 터미널에서 codex를 실행해 훅 승인 안내를 따르세요. 승인 전에는 Codex에서 자동 복구가 돌지 않습니다. Codex를 쓰지 않으면 uninstall --agents codex로 빼세요` : 'Codex 훅 승인됨(prompt, post, stop)');
+    say(waiting.length === 0, waiting.length ? `Codex 훅 승인 필요(${waiting.join(', ')}): 터미널에서 codex를 실행해 훅 승인 안내를 따르세요${platform === 'win32' ? '(Codex 앱만 설치해 codex 명령이 없으면 PowerShell에서 & "$env:LOCALAPPDATA\\OpenAI\\Codex\\bin\\<폴더>\\codex.exe" --no-daemon)' : ''}. 승인 전에는 Codex에서 자동 복구가 돌지 않습니다. Codex를 쓰지 않으면 uninstall --agents codex로 빼세요` : 'Codex 훅 승인됨(prompt, post, stop)');
   }
   return lines;
 }
