@@ -14,6 +14,10 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 
 [바로 시작](#5분-시작) · [사용 예시](#이렇게-씁니다-초간단-3단계) · [결과물](#결과물은-이렇게-생겼습니다) · [문서](#문서)
 
+<a href="docs/media/html-doc-kit-usage.mp4"><img src="docs/media/usage-poster.png" width="720" alt="html-doc-kit 사용 설명 영상(2분 55초)"></a>
+
+<sub>눌러서 사용 설명 영상(2분 55초) 보기 · 설치 → 에이전트에게 요청 → 보기·고치기·저장 → 자동 복구</sub>
+
 </div>
 
 ---
@@ -245,7 +249,8 @@ html-doc-kit/
 ├── tools/                     # 번들러, 글꼴 생성, 릴리스 가드
 ├── docs/
 │   ├── HOOKS.md               # 훅이 건드리는 파일과 남는 한계
-│   └── WINDOWS_TEST.md        # Windows 시험 안내
+│   ├── WINDOWS_TEST.md        # Windows 시험 안내
+│   └── media/                 # 사용 설명 영상과 표지
 ├── LICENSE                    # MIT
 ├── PRD.md                     # 요구사항
 └── PLAN.md                    # 작업계획과 진행 현황
