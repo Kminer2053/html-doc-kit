@@ -9850,6 +9850,7 @@ function sweepProfiles({ dir = os.tmpdir(), now = Date.now() } = {}) {
       if (now - fs2.statSync(f).mtimeMs < 36e5) continue;
       const chromeMade = fs2.existsSync(path.join(f, "Local State")) || fs2.existsSync(path.join(f, "DevToolsActivePort")) || fs2.statSync(path.join(f, "Default"), { throwIfNoEntry: false })?.isDirectory();
       if (chromeMade) fs2.rmSync(f, { recursive: true, force: true });
+      else if (/^doc-kit-[A-Za-z0-9]{6}$/.test(d.name) && !fs2.readdirSync(f).length) fs2.rmdirSync(f);
     } catch {
     }
   }

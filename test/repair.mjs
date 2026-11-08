@@ -1710,7 +1710,7 @@ if (findChrome()) {
   };
   const stale = fake('doc-kit-stale1', 'Local State', 2);
   const fresh = fake('doc-kit-fresh1', 'Local State', 0.1);
-  const other = fake('doc-kit-other1', null, 2);
+  const other = fake('doc-kit-other1', 'notes.txt', 2); // 빈 폴더는 지우므로 프로필 아닌 파일을 하나 둔다
   const before = profiles();
   const f = path.join(OUT, 'profile-clean.html');
   fs.writeFileSync(f, plain('', BODY));

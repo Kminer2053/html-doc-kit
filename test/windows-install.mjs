@@ -40,7 +40,7 @@ const quoted = `"${process.execPath}"`;
 
 try {
   // 1. 첫 낱말
-  ok('Mac·Linux는 예전 그대로 따옴표 경로', nodeToken() === quoted && nodeToken({platform: 'linux', env: win(good), probe}) === quoted);
+  ok('Mac·Linux는 예전 그대로 따옴표 경로', nodeToken({platform: 'darwin', env: win(good), probe}) === quoted && nodeToken({platform: 'linux', env: win(good), probe}) === quoted);
   ok('Windows: PATH에 Node 24 node.exe가 있으면 맨 node', nodeToken(W(good)) === 'node');
   ok('Windows: Path 키 이름의 대소문자가 달라도 찾음', nodeToken({...W(good), env: {Path: good, PathExt: '.EXE'}}) === 'node');
   ok('Windows: PATH의 node가 22 미만이면 따옴표 경로', nodeToken(W(old)) === quoted);
@@ -132,6 +132,9 @@ try {
   const fresh = mk('doc-kit-dddddd', 'Local State', false);
   const plain = mk('doc-kit-eeeeee', 'notes.txt');
   const other = mk('other-ffffff', 'Local State');
+  const emptyOld = mk('doc-kit-gggggg', null);
+  const emptyFresh = mk('doc-kit-hhhhhh', null, false);
+  const emptyOdd = mk('doc-kit-rel-x', null);
   const notDir = path.join(tmp, 'doc-kit-roundtrip-1.html');
   fs.writeFileSync(notDir, 'x');
   fs.utimesSync(notDir, hourAgo, hourAgo);
@@ -139,6 +142,7 @@ try {
   ok('정리: 한 시간 넘은 Chrome 프로필 모양 doc-kit-* 폴더만 지움', ![a, b, c].some((d) => fs.existsSync(d)) && [fresh, plain, other, notDir].every((d) => fs.existsSync(d)));
   sweepProfiles({dir: path.join(root, 'no-such-dir')});
   ok('정리: 임시 폴더가 없어도 오류 없음', true);
+  ok('정리: 한 시간 넘은 빈 doc-kit-XXXXXX 폴더도 지우고, 새 것과 다른 이름은 둠', !fs.existsSync(emptyOld) && fs.existsSync(emptyFresh) && fs.existsSync(emptyOdd));
 } catch (e) {
   ok('예외 없이 끝남', false, e.stack);
 } finally {
