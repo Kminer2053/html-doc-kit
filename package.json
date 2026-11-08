@@ -2,6 +2,7 @@
   "name": "html-doc-kit",
   "version": "1.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "description": "HTML documents that always include a viewer and an editor",
   "engines": {
