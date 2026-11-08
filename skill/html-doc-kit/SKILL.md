@@ -1,7 +1,7 @@
 ---
 name: html-doc-kit
 description: 사람이 읽는 HTML 문서(보고서, 장표, 발표 자료, 회의록, 소개 자료, 정리 문서)를 만들거나 고칠 때 반드시 쓴다. 결과 파일에 뷰어와 편집기를 넣어 브라우저에서 바로 고치고 저장할 수 있게 한다. "HTML로 만들어줘", "html 문서", "HTML 보고서", "HTML 장표"에 해당한다. 웹앱·웹사이트의 HTML에는 쓰지 않는다.
-license: 비공개. 내장 글꼴은 SIL OFL 1.1 (assets/OFL.txt)
+license: MIT. 내장 글꼴은 SIL OFL 1.1 (assets/OFL.txt)
 compatibility: Node 22 이상. 브라우저 시험에는 Chrome 또는 Edge를 쓰며 없으면 건너뛴다.
 ---
 

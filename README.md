@@ -10,6 +10,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ![출력](https://img.shields.io/badge/출력-HTML%20한%20파일-267A68)
 ![키트](https://img.shields.io/badge/키트-1.0.0-2563EB)
 ![확인](https://img.shields.io/badge/확인-macOS-6B7280)
+[![License: MIT](https://img.shields.io/badge/License-MIT-EAB308)](LICENSE)
 
 [바로 시작](#5분-시작) · [사용 예시](#이렇게-씁니다-초간단-3단계) · [결과물](#결과물은-이렇게-생겼습니다) · [문서](#문서)
 
@@ -245,6 +246,7 @@ html-doc-kit/
 ├── docs/
 │   ├── HOOKS.md               # 훅이 건드리는 파일과 남는 한계
 │   └── WINDOWS_TEST.md        # Windows 시험 안내
+├── LICENSE                    # MIT
 ├── PRD.md                     # 요구사항
 └── PLAN.md                    # 작업계획과 진행 현황
 ```
@@ -283,7 +285,7 @@ npm test        # 전체 시험(수십 분)
 
 사내 발표 장표를 편집용으로 만들며 생긴 뷰어·편집기에서 출발해 분리한 스킬입니다. 기여는 언제든 환영합니다. 이슈나 PR을 열어 주세요.
 
-라이선스는 아직 정하지 않았습니다. 내장 글꼴(Noto Sans CJK KR 부분 집합)은 SIL Open Font License 1.1을 따르며 전문은 [`skill/html-doc-kit/assets/OFL.txt`](skill/html-doc-kit/assets/OFL.txt)에 있습니다.
+[MIT License](LICENSE)로 배포합니다. 내장 글꼴(Noto Sans CJK KR 부분 집합)은 SIL Open Font License 1.1을 따르며 전문은 [`skill/html-doc-kit/assets/OFL.txt`](skill/html-doc-kit/assets/OFL.txt)에 있습니다.
 
 ---
 
