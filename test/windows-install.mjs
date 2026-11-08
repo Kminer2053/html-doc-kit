@@ -150,6 +150,9 @@ try {
   ok('Codex 승인: macOS 키(큰따옴표·슬래시)도 그대로', codexTrusted(macConf, 'stop') && !codexTrusted(macConf, 'post_tool_use'));
   ok('Codex 승인: 큰따옴표 안 이중 역슬래시 키도 알아봄', codexTrusted('[hooks.state."C:\\\\Users\\\\U\\\\.codex\\\\hooks.json:stop:0:0"]\ntrusted_hash = "x"', 'stop'));
   ok('Codex 승인: 따옴표 짝이 안 맞으면 아님', !codexTrusted('[hooks.state."C:/u/.codex/hooks.json:stop:0:0\']\ntrusted_hash = "x"', 'stop'));
+  // W6: 설치에 쓰는 묶음 파일에도 같은 판이 들어가야 한다(소스만 고치고 다시 묶지 않은 일이 있었다)
+  const bundled = fs.readFileSync(path.join(here, '..', 'skill', 'html-doc-kit', 'scripts', 'doc-kit.mjs'), 'utf-8');
+  ok('묶음 파일: Windows Codex 승인 키 정규식과 --no-daemon 안내가 들어 있음', bundled.includes(`hooks\\\\.state\\\\.(["'])`) && bundled.includes('--no-daemon'));
 } catch (e) {
   ok('예외 없이 끝남', false, e.stack);
 } finally {

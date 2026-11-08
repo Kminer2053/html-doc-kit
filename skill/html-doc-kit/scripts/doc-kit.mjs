@@ -12564,7 +12564,7 @@ function uninstall({ home = os3.homedir(), agents = ALL_AGENTS } = {}) {
   return agents.map((a3) => AGENT_NAMES[a3]);
 }
 var CODEX_EVENTS = { prompt: "user_prompt_submit", post: "post_tool_use", stop: "stop" };
-var codexTrusted = (conf, event) => new RegExp(`\\[hooks\\.state\\."[^"]*\\.codex/hooks\\.json:${event}:[^"]*"\\]\\s*\\n\\s*trusted_hash`, "i").test(conf);
+var codexTrusted = (conf, event) => new RegExp(`\\[hooks\\.state\\.(["'])[^"'\\n]*\\.codex[\\\\/]+hooks\\.json:${event}:[^"'\\n]*\\1\\]\\s*\\n\\s*trusted_hash`, "i").test(conf);
 var ourCommands = (hooks) => Object.values(hooks).flatMap((l) => Array.isArray(l) ? l : []).flatMap((h) => [h?.command, ...Array.isArray(h?.hooks) ? h.hooks.map((x2) => x2?.command) : []]).filter(isOurCommand);
 function smoke(prefix, env, persist) {
   const want = (r) => r.status === 0 && r.stdout.trim() === VERSION;
@@ -12614,7 +12614,7 @@ function doctor({ home = os3.homedir(), agents, platform = process.platform, env
   if (targets.includes("codex")) {
     const conf = fs5.existsSync(p.codexConfig) ? fs5.readFileSync(p.codexConfig, "utf-8") : "";
     const waiting = Object.entries(CODEX_EVENTS).filter(([, event]) => !codexTrusted(conf, event)).map(([name]) => name);
-    say(waiting.length === 0, waiting.length ? `Codex \uD6C5 \uC2B9\uC778 \uD544\uC694(${waiting.join(", ")}): \uD130\uBBF8\uB110\uC5D0\uC11C codex\uB97C \uC2E4\uD589\uD574 \uD6C5 \uC2B9\uC778 \uC548\uB0B4\uB97C \uB530\uB974\uC138\uC694. \uC2B9\uC778 \uC804\uC5D0\uB294 Codex\uC5D0\uC11C \uC790\uB3D9 \uBCF5\uAD6C\uAC00 \uB3CC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. Codex\uB97C \uC4F0\uC9C0 \uC54A\uC73C\uBA74 uninstall --agents codex\uB85C \uBE7C\uC138\uC694` : "Codex \uD6C5 \uC2B9\uC778\uB428(prompt, post, stop)");
+    say(waiting.length === 0, waiting.length ? `Codex \uD6C5 \uC2B9\uC778 \uD544\uC694(${waiting.join(", ")}): \uD130\uBBF8\uB110\uC5D0\uC11C codex\uB97C \uC2E4\uD589\uD574 \uD6C5 \uC2B9\uC778 \uC548\uB0B4\uB97C \uB530\uB974\uC138\uC694${platform === "win32" ? '(Codex \uC571\uB9CC \uC124\uCE58\uD574 codex \uBA85\uB839\uC774 \uC5C6\uC73C\uBA74 PowerShell\uC5D0\uC11C & "$env:LOCALAPPDATA\\OpenAI\\Codex\\bin\\<\uD3F4\uB354>\\codex.exe" --no-daemon)' : ""}. \uC2B9\uC778 \uC804\uC5D0\uB294 Codex\uC5D0\uC11C \uC790\uB3D9 \uBCF5\uAD6C\uAC00 \uB3CC\uC9C0 \uC54A\uC2B5\uB2C8\uB2E4. Codex\uB97C \uC4F0\uC9C0 \uC54A\uC73C\uBA74 uninstall --agents codex\uB85C \uBE7C\uC138\uC694` : "Codex \uD6C5 \uC2B9\uC778\uB428(prompt, post, stop)");
   }
   return lines;
 }
