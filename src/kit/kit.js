@@ -22,7 +22,7 @@
   const OVER_TOLERANCE = 3; // 처음 값보다 이만큼(px) 더 넘치거나 겹쳐야 경고한다
   const BIG_IMAGE = 200000; // 이보다 큰 새 그림은 임시 저장에 넣지 않는다(저장 공간이 모자라 글까지 못 남긴다)
   const MANY_HOSTS = 200; // 칸이 이보다 많은 쪽은 겹침을 재지 않는다(입력이 느려진다)
-  const HINT_ON = '글자를 눌러 바로 고칩니다 · 그림은 끌어서 옮깁니다 · Esc 글자에서 나오기 · ⌘S/Ctrl+S 저장 · 글자 밖에서 ← → 이동 · N 메모 · R 연속 읽기 · F 전체화면 · E 편집 끄기';
+  const HINT_ON = '글자를 눌러 바로 고칩니다 · 그림은 끌어서 옮깁니다 · Esc 글자에서 나오기 · ⌘S/Ctrl+S 저장 · ⌘P 인쇄 · 글자 밖에서 ← → 이동 · N 메모 · R 연속 읽기 · F 전체화면 · E 편집 끄기';
   const HINT_OFF = '← → 이동 · Space 다음 · R 연속 읽기 · N 메모 · F 전체화면 · E 편집 켜기';
 
   const book = JSON.parse($('#dk-book').textContent || '{}');
@@ -75,7 +75,7 @@
     '<button id="dk-prev" aria-label="이전 쪽">←</button><button id="dk-next" aria-label="다음 쪽">→</button><span id="dk-position" aria-live="polite"></span>' +
     '<select id="dk-picker" aria-label="쪽 선택"></select><button id="dk-read" aria-pressed="false">읽기 R</button><button id="dk-notes" aria-pressed="false">메모 N</button>' +
     '<button id="dk-full">전체화면 F</button><time id="dk-elapsed">00:00</time><button id="dk-start">시작</button><button id="dk-reset">초기화</button>' +
-    '<button id="dk-edit" aria-pressed="true" title="편집 켜고 끄기">편집 켜짐 E</button><button id="dk-save" title="저장 (⌘S 또는 Ctrl+S)">저장</button><span id="dk-status" aria-live="polite"></span>';
+    '<button id="dk-edit" aria-pressed="true" title="편집 켜고 끄기">편집 켜짐 E</button><button id="dk-save" title="저장 (⌘S 또는 Ctrl+S)">저장</button><button id="dk-print" title="인쇄 (⌘P 또는 Ctrl+P)">인쇄</button><button id="dk-pdf" title="PDF로 저장">PDF</button><span id="dk-status" aria-live="polite"></span>';
   document.body.prepend(bar);
   const foot = document.createElement('div');
   foot.className = 'dk-ui dk-foot';
@@ -1131,6 +1131,29 @@
   });
   document.execCommand('styleWithCSS', false, true);
   $('#dk-save').addEventListener('click', save);
+  // ── 인쇄·PDF ──
+  // 편집 표시를 걷고 쪽마다 한 장씩 찍는다. PDF는 브라우저 인쇄 창에서 'PDF로 저장'으로 만든다
+  // 그동안 문서 제목을 파일 이름으로 바꿔 PDF 기본 이름이 HTML 파일과 같게 한다
+  let printTitle = null;
+  window.addEventListener('beforeprint', () => {
+    if (document.activeElement && document.activeElement.blur) document.activeElement.blur();
+    getSelection().removeAllRanges();
+    if (printTitle === null) printTitle = document.title;
+    document.title = FILE_NAME.replace(/\.html?$/i, '');
+  });
+  window.addEventListener('afterprint', () => {
+    if (printTitle !== null) document.title = printTitle;
+    printTitle = null;
+  });
+  const printDoc = () => {
+    if (!modalOpen) window.print();
+  };
+  $('#dk-print').addEventListener('click', printDoc);
+  $('#dk-pdf').addEventListener('click', async () => {
+    if (modalOpen) return;
+    const act = await askModal('인쇄 창이 열리면 대상(프린터)을 <b>PDF로 저장</b>으로 고르세요.', [['go', '인쇄 창 열기'], ['cancel', '취소']]);
+    if (act === 'go') setTimeout(printDoc, 50);
+  });
   editBtn.addEventListener('click', () => setEditing(!editing));
   resize();
   setEditing(true);

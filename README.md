@@ -8,15 +8,15 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ![Node 22+](https://img.shields.io/badge/Node-22%2B-339933?logo=nodedotjs&logoColor=white)
 ![에이전트](https://img.shields.io/badge/에이전트-Claude%20Code·Codex·Cursor-5E35B1)
 ![출력](https://img.shields.io/badge/출력-HTML%20한%20파일-267A68)
-![키트](https://img.shields.io/badge/키트-1.0.0-2563EB)
+![키트](https://img.shields.io/badge/키트-1.1.0-2563EB)
 ![확인](https://img.shields.io/badge/확인-macOS·Windows-6B7280)
 [![License: MIT](https://img.shields.io/badge/License-MIT-EAB308)](LICENSE)
 
 [바로 시작](#5분-시작) · [사용 예시](#이렇게-씁니다-초간단-3단계) · [결과물](#결과물은-이렇게-생겼습니다) · [문서](#문서)
 
-<a href="docs/media/html-doc-kit-usage.mp4"><img src="docs/media/usage-poster.png" width="720" alt="html-doc-kit 사용 설명 영상(2분 55초)"></a>
+<a href="docs/media/html-doc-kit-usage.mp4"><img src="docs/media/usage-poster.png" width="720" alt="html-doc-kit 사용 설명 영상(2분 37초)"></a>
 
-<sub>눌러서 사용 설명 영상(2분 55초) 보기 · 설치 → 에이전트에게 요청 → 보기·고치기·저장 → 자동 복구</sub>
+<sub>눌러서 사용 설명 영상(2분 37초) 보기 · 설치 → 에이전트에게 요청 → 보기·고치기·저장 → 자동 복구</sub>
 
 </div>
 
@@ -49,7 +49,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ```
 
 **3. 나온 파일을 브라우저로 엽니다.**
-　글자를 누르면 고칠 수 있고, 그림은 끌어서 옮기며, ⌘S 또는 Ctrl+S로 저장합니다.
+　글자를 누르면 고칠 수 있고, 그림은 끌어서 옮기며, ⌘S 또는 Ctrl+S로 저장합니다. 막대의 인쇄·PDF 단추로 종이나 PDF로 냅니다.
 
 **스킬 이름을 말하지 않아도 됩니다. HTML 문서를 시키기만 하면 됩니다.**
 
@@ -61,7 +61,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 
 | 구분 | 기능 |
 |---|---|
-| **뷰어** | 쪽 이동(단추, ← →, Space, PageUp/Down, Home, End) · 쪽 목록 · 연속 읽기(R) · 발표 메모(N) · 전체화면(F) · 경과 시간 · 창에 맞춘 배율 · 인쇄(편집 표시 없이 쪽별로) |
+| **뷰어** | 쪽 이동(단추, ← →, Space, PageUp/Down, Home, End) · 쪽 목록 · 연속 읽기(R) · 발표 메모(N) · 전체화면(F) · 경과 시간 · 창에 맞춘 배율 · 인쇄·PDF 저장 단추(편집 표시 없이 쪽별로, ⌘P도 같음) |
 | **편집기** | 모든 글자와 표 칸 고치기 · 편집 켜고 끄기(E) · 서식 막대(굵게, 크기, 색, 지우기) · 발표 메모 고치기 · 그림 바꾸기와 끌어서 옮기기 · 넘침 경고 |
 | **저장** | Chrome·Edge는 처음 고른 파일에 이어서 덮어쓰고, 파일이 밖에서 바뀌었으면 먼저 묻습니다. 그 밖의 브라우저는 내려받기로 저장합니다. 저장하지 않고 닫으면 고친 본문과 메모를 임시 저장에서 되살립니다 |
 | **쪽 형태** | `slide`, `a4`, `a4-landscape`, `auto` |

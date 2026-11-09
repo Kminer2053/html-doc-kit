@@ -65,5 +65,5 @@ body.dk-editing [data-dk-empty=inline]{display:inline-block;vertical-align:top}
   body.dk-js #dk-document{display:block;min-height:0}
   .dk-page,body.dk-js .dk-page,body.dk-js .dk-page:not(.dk-active){display:block!important;zoom:1!important;margin:0!important;box-shadow:none!important;break-after:page;contain:none}
   .dk-page:last-child{break-after:auto}
-  [data-dk-host],.dk-page img,.dk-page svg{outline:none!important}
+  [data-dk-host],[data-dk-empty],.dk-bad,.dk-page img,.dk-page svg{outline:none!important}
 }
