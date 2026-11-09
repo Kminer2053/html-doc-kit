@@ -559,6 +559,40 @@ await scenario('그림 옮기기: 저장 뒤 다시 열기', '#1', async () => {
   check('옮긴 뒤 다시 저장해도 파일이 그대로', again === html, again.length + ' vs ' + html.length);
 });
 
+await scenario('인쇄·PDF 단추', '#1', async () => {
+  await b.ev(`window.__prints=0;window.__titleAt=null;window.print=()=>{window.__prints++;window.dispatchEvent(new Event('beforeprint'));window.__titleAt=document.title;window.dispatchEvent(new Event('afterprint'))};1`);
+  check('막대에 인쇄·PDF 단추', await b.ev(`!!document.querySelector('#dk-print')&&!!document.querySelector('#dk-pdf')`));
+  const title = await b.ev('document.title');
+  await caretEnd(`[...document.querySelectorAll('${ACTIVE} [data-dk-host]')][0]`);
+  await b.ev(`document.querySelector('#dk-print').click();1`);
+  check('인쇄 단추가 인쇄 창을 엶', (await b.ev('window.__prints')) === 1);
+  const base = await b.ev(`decodeURIComponent(location.pathname.split('/').pop()).replace(/\\.html?$/i,'')`);
+  check('인쇄하는 동안 제목이 파일 이름', (await b.ev('window.__titleAt')) === base, await b.ev('window.__titleAt'));
+  check('인쇄 뒤 제목 되돌림', (await b.ev('document.title')) === title);
+  check('인쇄 전에 글자 칸에서 나옴', await b.ev(`!document.activeElement||!document.activeElement.isContentEditable`));
+  await b.ev(`document.querySelector('#dk-pdf').click();1`);
+  await sleep(100);
+  check('PDF 단추는 안내 창부터', await b.ev(`!!document.querySelector('.dk-modal')&&document.querySelector('.dk-modal').textContent.includes('PDF로 저장')`));
+  await b.ev(`document.querySelector('.dk-modal [data-a=go]').click();1`);
+  await sleep(200);
+  check('안내 뒤 인쇄 창을 엶', (await b.ev('window.__prints')) === 2);
+  await b.ev(`document.querySelector('#dk-pdf').click();1`);
+  await sleep(100);
+  await b.ev(`document.querySelector('.dk-modal [data-a=cancel]').click();1`);
+  await sleep(200);
+  check('취소하면 열지 않음', (await b.ev('window.__prints')) === 2);
+  await b.send('Emulation.setEmulatedMedia', {media: 'print'});
+  const shown = await b.ev(`[...document.querySelectorAll('.dk-ui')].filter(e=>getComputedStyle(e).display!=='none').length`);
+  const pages = await b.ev(`[...document.querySelectorAll('.dk-page')].filter(e=>getComputedStyle(e).display!=='none').length`);
+  const total = await b.ev(`document.querySelectorAll('.dk-page').length`);
+  await b.send('Emulation.setEmulatedMedia', {media: ''});
+  check('인쇄 때 조작 막대 숨김', shown === 0, shown);
+  check('인쇄 때 모든 쪽이 나옴(편집 중이어도)', pages === total, pages + '/' + total);
+  const pdf = await b.send('Page.printToPDF', {printBackground: true, preferCSSPageSize: true});
+  const n = (Buffer.from(pdf.data, 'base64').toString('latin1').match(/\/Type\s*\/Page[^s]/g) || []).length;
+  check('PDF 쪽 수 = 문서 쪽 수', n === total, n + '/' + total);
+});
+
 clearInterval(autoDialog);
 await b.close();
 console.log(fails ? `\n실패 ${fails}건 (통과 ${passes}건)` : `\n모두 통과 (${passes}건)`);

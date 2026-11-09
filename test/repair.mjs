@@ -425,12 +425,14 @@ ok('29 부품이 온전한 새 버전 파일은 check 완성·경고', fc.status
 const uTmp = tmpDir('dk-up-');
 const newCli = path.join(uTmp, 'doc-kit.mjs');
 const bundle = fs.readFileSync(CLI, 'utf-8');
-ok('23 시험 번들 준비', /var VERSION = "1\.0\.0"/.test(bundle));
-fs.writeFileSync(newCli, bundle.replace(/var VERSION = "1\.0\.0"/, 'var VERSION = "1.1.0"'));
+// 지금 버전을 해시표에 둔 채 버전만 올린 번들로, 지금 버전 파일이 올라가는지 본다
+const curVer = (bundle.match(/var VERSION = "([^"]+)"/) || [])[1];
+ok('23 시험 번들 준비', !!curVer, curVer);
+fs.writeFileSync(newCli, bundle.replace(`var VERSION = "${curVer}"`, 'var VERSION = "98.0.0"'));
 const upf = ef('up.html');
 fs.copyFileSync(ef('deck.html'), upf);
 const upr = spawnSync('node', [newCli, 'upgrade', upf, '--no-browser'], {encoding: 'utf-8'});
-ok('23 해시표에 있는 옛 버전도 upgrade로 바뀌고 백업됨', upr.status === 0 && fs.readFileSync(upf, 'utf-8').includes('data-doc-kit="1.1.0"') && backups('up.html').length === 1, upr.stdout + upr.stderr);
+ok('23 해시표에 있는 옛 버전도 upgrade로 바뀌고 백업됨', upr.status === 0 && fs.readFileSync(upf, 'utf-8').includes('data-doc-kit="98.0.0"') && backups('up.html').length === 1, upr.stdout + upr.stderr);
 
 // 53: 문서 내용이 키트를 망가뜨리지 않는다
 const hostile = {
