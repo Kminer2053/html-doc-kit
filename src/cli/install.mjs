@@ -89,10 +89,19 @@ export function pathNode({platform = process.platform, env = process.env, execPa
   if (!rel.startsWith('..') && !path.isAbsolute(rel)) return null;
   return findNode(envGet(env, 'PATH'), o) ? hit : null;
 }
-// 훅 명령의 첫 낱말. Windows에서 쓸 만한 node가 PATH에 없을 때만 따옴표 경로로 둔다. 다른 OS는 예전 그대로다
-export function nodeToken({platform = process.platform, env = process.env, execPath = process.execPath, probe, readReg} = {}) {
+// Homebrew의 버전 폴더(.../Cellar/node/26.13.0_2/bin/node)는 brew upgrade 때 지워져 훅이 끊긴다.
+// 판이 바뀌어도 그 formula를 가리키는 opt 링크(.../opt/node/bin/node)가 있으면 그것을 쓴다. 매번 같은 글자가 나와 Codex 승인도 유지된다
+const CELLAR_NODE = /^(.*)[\\/]Cellar[\\/]([^\\/]+)[\\/][^\\/]+[\\/]bin[\\/]node$/;
+export const isCellarNode = (p) => CELLAR_NODE.test(p);
+export function stableNode(execPath, exists = fs.existsSync) {
+  const m = CELLAR_NODE.exec(execPath);
+  const opt = m && path.join(m[1], 'opt', m[2], 'bin', 'node');
+  return opt && exists(opt) ? opt : execPath;
+}
+// 훅 명령의 첫 낱말. Windows에서 쓸 만한 node가 PATH에 없을 때만 따옴표 경로로 둔다. 다른 OS는 따옴표 경로다
+export function nodeToken({platform = process.platform, env = process.env, execPath = process.execPath, probe, readReg, exists} = {}) {
   if (platform === 'win32' && pathNode({platform, env, execPath, probe, readReg})) return 'node';
-  return `"${execPath}"`;
+  return `"${stableNode(execPath, exists)}"`;
 }
 const isSkill = (d) => fs.existsSync(path.join(d, 'SKILL.md')) && fs.existsSync(path.join(d, 'scripts', 'doc-kit.mjs'));
 const readJson = (f, fallback) => {
@@ -327,6 +336,8 @@ export function doctor({home = os.homedir(), agents, platform = process.platform
       if (m) return fs.existsSync(m[1]);
       return !/^node\s/.test(c) || !!pathNode({platform, env, probe, readReg});
     });
+  const cellar = [...new Set(targets.flatMap((a) => ourCommands(hooksOf(p, a))).map((c) => /^"([^"]+)"/.exec(c)?.[1]).filter((n) => n && isCellarNode(n)))];
+  if (cellar.length) say(null, `훅이 Homebrew 버전 폴더의 node(${cellar.join(', ')})를 부릅니다. brew upgrade로 node가 올라가면 훅이 끊기니 install을 다시 실행하세요(판이 바뀌어도 그대로인 경로로 바꿉니다. Codex는 훅을 한 번 다시 승인해야 합니다)`);
   for (const a of targets) {
     const f = hookFile(p, a);
     say(isSkill(skillDir(p, a)), `${AGENT_NAMES[a]} 스킬 ${skillDir(p, a)}`);
