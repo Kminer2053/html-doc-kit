@@ -8,7 +8,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ![Node 22+](https://img.shields.io/badge/Node-22%2B-339933?logo=nodedotjs&logoColor=white)
 ![에이전트](https://img.shields.io/badge/에이전트-Claude%20Code·Codex·Cursor-5E35B1)
 ![출력](https://img.shields.io/badge/출력-HTML%20한%20파일-267A68)
-![키트](https://img.shields.io/badge/키트-1.1.0-2563EB)
+![키트](https://img.shields.io/badge/키트-1.2.0-2563EB)
 ![확인](https://img.shields.io/badge/확인-macOS·Windows-6B7280)
 [![License: MIT](https://img.shields.io/badge/License-MIT-EAB308)](LICENSE)
 
@@ -119,7 +119,7 @@ node skill/html-doc-kit/scripts/doc-kit.mjs doctor
 이번 분기 실적 보고서를 HTML로 만들어줘. 내용은 예시로 채워.
 ```
 
-`install`은 세 에이전트의 스킬, 전역 지침, 훅을 넣습니다. 기존 설정은 보존합니다. 처음 고칠 때 `*.doc-kit-bak`을, 그 뒤로 내용이 바뀔 때마다 시각을 붙인 백업을 남깁니다. 다시 설치하거나 제거할 때는 키트가 넣은 훅 항목만 빼므로 같은 그룹의 사용자 훅은 남습니다.
+`install`은 세 에이전트의 스킬, 전역 지침, 훅을 넣습니다. 기존 설정은 보존합니다. 설치한 뒤로는 키트가 문서 명령(`build`·`ensure`·`check` 등)을 실행할 때 한 시간에 한 번 GitHub의 최신 릴리스를 확인해, 새 버전이 있으면 스스로 받아 다시 설치하고 하던 명령을 이어 갑니다. 훅은 확인하지 않습니다. 끄려면 환경 변수 `DOC_KIT_NO_UPDATE=1`, 손으로 하려면 `doc-kit update`입니다. 처음 고칠 때 `*.doc-kit-bak`을, 그 뒤로 내용이 바뀔 때마다 시각을 붙인 백업을 남깁니다. 다시 설치하거나 제거할 때는 키트가 넣은 훅 항목만 빼므로 같은 그룹의 사용자 훅은 남습니다.
 
 ### Claude Code
 
@@ -166,6 +166,7 @@ extract <파일.html> [-o 본문.html]   완성 파일에서 본문만 꺼냅니
 apply <본문.html> <파일.html> [--shrink]  고친 본문을 완성 파일로 되돌립니다. 쪽을 일부러 줄였으면 --shrink
 upgrade <파일.html>                  키트를 최신으로 바꿉니다
 install | uninstall | doctor         에이전트 설치·제거·점검(--home 경로, --agents claude,codex,cursor)
+update                               새 버전이 있으면 받아 다시 설치합니다
 공통: --no-browser 브라우저 시험 생략
 ```
 
@@ -183,11 +184,11 @@ node skill/html-doc-kit/scripts/doc-kit.mjs check 결과.html   # -> 종료 코�
 
 ## 훅이 건드리는 파일
 
-모델이 지침을 어기고 HTML을 직접 썼을 때 작업이 끝나며 훅이 하는 일입니다.
+모델이 지침을 어기고 HTML을 직접 썼을 때 작업이 끝나며 훅이 하는 일입니다. 1.2.0부터는 **문서가 분명할 때만** 넣고, 애매하면 묻습니다.
 
 - **고치는 근거는 둘뿐** — 에이전트가 그 경로에 썼다는 직접 증거(도구의 파일 경로, 셸 명령의 쓰기 대상)가 있거나, 쓰기가 있었던 턴에 작업 폴더에서 바뀐 파일일 때만 고칩니다. 그 밖은 `확인 필요`로 알리기만 합니다.
-- **평범한 HTML** — 제자리에서 입히고, 원본은 `.doc-kit/backup/`에 둡니다.
-- **자체 스크립트가 있는 HTML** — 그대로 두고 옆에 `이름_편집용.html` 사본을 만듭니다.
+- **문서 요청으로 만든 평범한 HTML** — 제자리에서 입히고, 원본은 `.doc-kit/backup/`에 둡니다. 문서인지는 요청 글(보고서·장표·회의록 같은 낱말)로 가늠합니다.
+- **애매하거나 프로그램인 HTML** — 그냥 "HTML로 만들어줘", 게임·계산기·웹앱 요청, 자체 스크립트가 있는 파일은 건드리지 않고(사본도 만들지 않고) 에이전트가 "뷰어·편집기를 넣을까요?"라고 묻게 합니다. 원하면 그때 넣고, 한 세션에서 같은 파일을 두 번 묻지 않습니다.
 - **건드리지 않는 곳** — 웹앱·웹사이트 프로젝트의 앱 폴더, 템플릿 파일, git이 무시하는 파일, 바탕화면·다운로드·문서 폴더(직접 쓴 증거가 없을 때), `.doc-kit.json`의 `exclude`, `<meta name="doc-kit" content="off">`가 든 파일. 모두 이유를 알립니다.
 
 상세: [`docs/HOOKS.md`](docs/HOOKS.md)
@@ -224,7 +225,11 @@ node skill/html-doc-kit/scripts/doc-kit.mjs check 결과.html   # -> 종료 코�
 
 **웹앱이나 웹사이트의 HTML도 바꾸나요?** 아닙니다. 웹 프레임워크·빌드 설정이 있는 프로젝트와 앱 폴더는 건드리지 않고 이유만 알립니다.
 
-**모델이 스킬을 안 쓰고 HTML을 직접 쓰면요?** 작업이 끝날 때 훅이 키트를 넣습니다. 끝난 뒤 `check`가 0이면 완성입니다.
+**모델이 스킬을 안 쓰고 HTML을 직접 쓰면요?** 문서 요청이었으면 작업이 끝날 때 훅이 키트를 넣습니다. 문서인지 애매하면 넣을지 묻습니다. 끝난 뒤 `check`가 0이면 완성입니다.
+
+**HTML이면 무조건 들어가나요?** 아닙니다. 게임·계산기 같은 단독 실행 프로그램이나 웹앱에는 넣지 않고, 애매하면 먼저 묻습니다.
+
+**새 버전은 어떻게 받나요?** 설치한 키트가 쓸 때마다(한 시간에 한 번) 확인해 스스로 업데이트합니다. 끄려면 `DOC_KIT_NO_UPDATE=1`입니다.
 
 **Windows에서도 되나요?** 됩니다. Windows 10에서 설치, 명령, 훅(Git Bash·PowerShell·cmd), Claude Code·Codex·Cursor CLI 실행을 확인했습니다. 훅은 Node 22 이상이 시스템 PATH에 있으면 어느 셸에서나 돌고, 없으면 `doctor`가 알려 줍니다. Codex 앱만 깔아 `codex` 명령이 없으면 훅 승인은 앱 안의 `codex.exe`에 `--no-daemon`을 붙여 실행해 합니다(`doctor`가 경로를 알려 줌). Chrome에서 진짜 저장 창으로 덮어쓰기와 그림 끌기를 확인했고, Cursor 앱으로 만든 보고서도 통과했습니다. Chrome은 `AppData` 아래(임시 폴더 포함)에는 저장을 막으니, 고칠 문서는 문서 폴더 같은 곳에 두세요. [Windows 시험 안내](docs/WINDOWS_TEST.md)로 직접 시험할 수 있습니다.
 
@@ -268,7 +273,7 @@ npm test        # 전체 시험(수십 분)
 
 키트 코드(`src/kit/`)를 바꿔 내놓을 때는 `package.json`의 버전을 올립니다. `src/kit/versions.json`에 버전별 해시가 쌓여 옛 파일도 `check`를 통과합니다.
 
-릴리스할 때는 `v<버전>` 태그(예: `git tag v1.0.0`)를 붙입니다. 태그가 생긴 뒤로는 키트 코드가 태그 때와 다르면 `npm run build`가 "버전을 올린 뒤 다시 빌드하세요"로 멈춥니다(`tools/release-guard.mjs`). 같은 버전 번호로 해시가 바뀌면 이미 나간 파일이 모두 `check` C2에서 실패하기 때문입니다.
+릴리스할 때는 `v<버전>` 태그(예: `git tag v1.0.0`)를 붙이고, `npm run pack`으로 만든 `dist/html-doc-kit-skill.tar.gz`를 릴리스에 첨부합니다(설치된 키트의 업데이트가 이 파일을 받습니다. 없으면 저장소 소스 묶음을 받습니다). 태그가 생긴 뒤로는 키트 코드가 태그 때와 다르면 `npm run build`가 "버전을 올린 뒤 다시 빌드하세요"로 멈춥니다(`tools/release-guard.mjs`). 같은 버전 번호로 해시가 바뀌면 이미 나간 파일이 모두 `check` C2에서 실패하기 때문입니다.
 
 ---
 

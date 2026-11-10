@@ -16,11 +16,21 @@
 - `~/Desktop`, `~/Downloads`, `~/Documents`는 훑어서 고치지 않습니다. 명령 글자에 폴더 이름이 나와도(`ls ~/Downloads`, 커밋 메시지 등) 마찬가지입니다. 사용자가 받거나 저장한 파일이 섞이기 때문입니다. 거기 있는 파일은 위 (가)의 직접 쓰기 증거(`-o ~/Desktop/r.html`, `> ~/Downloads/a.html` 등)가 있을 때만 고칩니다. 스크립트를 돌린 턴에 이번 턴에 바뀐 HTML이 이 폴더 바로 아래에 있으면 `확인 필요`로 알립니다(`ls`, `git status` 같은 읽기 명령만 돌린 턴은 제외). 작업 폴더가 이 폴더 안의 프로젝트이면 작업 폴더 스캔은 다른 곳과 같습니다.
 - 스캔으로만 찾은 파일이 git에서 HEAD와 같으면, 이번 턴에 이 저장소에서 `git commit`으로 커밋한 파일(작성 시각과 커미터 시각이 모두 이번 턴 안)은 처리하고, 그 밖(checkout, 지난 커밋을 다시 쓴 rebase, pull로 받은 남의 커밋 등)은 건너뛰고 알립니다. 5개를 넘으면 입히지 않고 목록만 알립니다.
 
+## 넣을지 묻기(1.2.0)
+
+훅은 키트가 없는 HTML에 **문서가 분명할 때만** 키트를 넣습니다. 그 밖은 파일을 건드리지 않고(사본도 만들지 않고) 넣을지 사용자에게 묻습니다.
+
+- 문서인지는 그 턴의 요청 글로 가늠합니다. `뷰어`·`편집기`·`doc-kit`이 있으면 문서, `게임`·`앱`·`웹사이트`·`계산기`·`도구`·`퀴즈`·`app`·`tool` 같은 프로그램 낱말이 있으면 프로그램(문서 낱말이 함께 있어도), `보고서`·`장표`·`발표`·`회의록`·`자료`·`정리`·`report`·`slides` 같은 문서 낱말이 있으면 문서, 둘 다 없으면 애매함으로 봅니다. 낱말이 없는 이어 요청("표 하나 더 넣어줘")은 앞 턴의 판단을 잇습니다.
+- 프로그램이나 애매함이면 묻습니다. 문서여도 자체 스크립트·`on*` 속성·`iframe`·`object`·`embed`가 있는 파일과 서버 웹 프레임워크 프로젝트의 파일은 묻습니다(혼자 도는 프로그램이거나 앱이 쓰는 파일일 수 있어서).
+- 묻는 방법: Claude Code·Codex는 끝날 때 `decision: block`으로 모델에게 "사용자에게 넣을지 한 문장으로 묻고 끝내라, 지금 넣지 말라"를 넘깁니다. Cursor는 `followup_message`로 같은 글을 넘깁니다. 넣는 명령(`ensure`, 원본을 지켜야 하는 파일은 `-o 이름_편집용.html`)도 함께 알려 줍니다. 이미 훅 때문에 이어 가는 중(`stop_hook_active`)이면 다시 막지 않고 알리기만 합니다.
+- 한 세션에서 이미 물은 파일은 바뀌어도 다시 묻지 않습니다.
+- 요청 글을 받지 못하는 실행(Cursor CLI의 `-p`)은 예전처럼 문서로 봅니다. 결과는 `~/.doc-kit/hook.log`에만 남습니다.
+
 ## 처리
 
-- 스크립트 없는 HTML: 제자리에서 입힙니다. 원본은 `.doc-kit/backup/`에 두고 경로를 알립니다.
-- 자체 스크립트, `on*` 속성, `iframe`·`object`·`embed`가 있는 HTML: 그대로 두고 옆에 `이름_편집용.html`을 만듭니다. 사본에서는 그 요소가 빠지므로 경고로 알립니다.
-- `requirements.txt`, `pyproject.toml`, `setup.py`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `mix.exs`, `composer.json`, `Gemfile`만 있는 저장소의 평범한 보고서: 일반 문서처럼 제자리에서 입힙니다. 이 파일의 의존성 선언 자리에 서버 웹 프레임워크(flask, django, fastapi, rails, sinatra, laravel, spring-boot, gin, axum, phoenix 등)가 있으면 앱 폴더(`templates/`, `static/`, `views/` 등) 안은 건드리지 않고 알리며, 그 밖의 HTML은 원본을 두고 `이름_편집용.html` 사본을 만들어 알립니다. 이름은 의존성을 적는 자리에서만 찾습니다: requirements는 줄 첫머리 패키지 이름, `pyproject.toml`은 `dependencies`·`optional-dependencies` 배열(Poetry는 `[tool.poetry.dependencies]` 키), `Cargo.toml`은 `[dependencies]` 표의 키, `Gemfile`은 `gem '이름'`, `go.mod`는 `require` 경로, `composer.json`은 `require` 키, `pom.xml`·`build.gradle`은 `artifactId`·의존성 좌표·플러그인 id, `mix.exs`는 deps. 설명·주석에 나온 낱말(`description = "Generate a poem"` 등)은 신호가 아닙니다. jinja2, tornado, sphinx, markupsafe, jupyter, jekyll, 그리고 대개 HTTP 클라이언트로 쓰는 aiohttp는 웹앱 신호가 아닙니다. Sphinx `conf.py`도 코드 프로젝트 신호로만 보고 출력 폴더 `_build/`만 뺍니다.
+- 스크립트 없는 HTML(문서 요청): 제자리에서 입힙니다. 원본은 `.doc-kit/backup/`에 두고 경로를 알립니다.
+- 자체 스크립트, `on*` 속성, `iframe`·`object`·`embed`가 있는 HTML: 그대로 두고 넣을지 묻습니다. 원하면 `ensure 파일 -o 이름_편집용.html`로 사본을 만듭니다. 사본에서는 그 요소가 빠집니다.
+- `requirements.txt`, `pyproject.toml`, `setup.py`, `go.mod`, `Cargo.toml`, `pom.xml`, `build.gradle`, `mix.exs`, `composer.json`, `Gemfile`만 있는 저장소의 평범한 보고서: 일반 문서처럼 제자리에서 입힙니다. 이 파일의 의존성 선언 자리에 서버 웹 프레임워크(flask, django, fastapi, rails, sinatra, laravel, spring-boot, gin, axum, phoenix 등)가 있으면 앱 폴더(`templates/`, `static/`, `views/` 등) 안은 건드리지 않고 알리며, 그 밖의 HTML은 원본을 두고 넣을지 묻습니다. 이름은 의존성을 적는 자리에서만 찾습니다: requirements는 줄 첫머리 패키지 이름, `pyproject.toml`은 `dependencies`·`optional-dependencies` 배열(Poetry는 `[tool.poetry.dependencies]` 키), `Cargo.toml`은 `[dependencies]` 표의 키, `Gemfile`은 `gem '이름'`, `go.mod`는 `require` 경로, `composer.json`은 `require` 키, `pom.xml`·`build.gradle`은 `artifactId`·의존성 좌표·플러그인 id, `mix.exs`는 deps. 설명·주석에 나온 낱말(`description = "Generate a poem"` 등)은 신호가 아닙니다. jinja2, tornado, sphinx, markupsafe, jupyter, jekyll, 그리고 대개 HTTP 클라이언트로 쓰는 aiohttp는 웹앱 신호가 아닙니다. Sphinx `conf.py`도 코드 프로젝트 신호로만 보고 출력 폴더 `_build/`만 뺍니다.
 - 건드리지 않음(모두 이유를 알림): 웹 프레임워크·웹 서버·빌드 설정(`package.json`의 웹 의존성, 빌드 설정 파일 등)이 있는 프로젝트, 위 프로젝트 파일 속 서버 웹 프레임워크가 있는 프로젝트의 앱 폴더, 코드 프로젝트(`package.json`이나 위 언어 프로젝트 파일이 있는 곳) 안의 `src/`, `public/`, `dist/`, `build/`, `static/`, `views/`, `templates/`, `partials/`, `emails/`, `site/`, `_build/`, `_site/` 등, `node_modules/`·`coverage/` 같은 의존성·리포트 폴더, 템플릿 지시문(`{% %}`, `<% %>`, `{{#...}}`)이 있는 파일(`pre`·`code`·`textarea`·`script`·`style` 안의 예시는 지시문으로 보지 않음), git이 무시하는 파일(스캔으로 찾은 경우), `.doc-kit.json`의 `exclude`, `<meta name="doc-kit" content="off">`. 프로젝트 위쪽은 `.git`이 없으면 작업 폴더까지만 봅니다.
 - `{{회사명}}` 같은 빈칸 표시와 CSS의 `{{`는 템플릿으로 보지 않습니다. `out/`, `target/`, `vendor/`도 앱 신호가 아닙니다. 프로젝트 신호가 없는 평범한 폴더에서는 `emails/`, `site/`, `public/`, `templates/` 같은 이름도 문서 폴더로 봅니다.
 - `.doc-kit/` 안의 본문 파일은 건드리지 않습니다. 그 밖의 곳에 있는 본문 파일과 고친 뒤 되돌리지 않은 본문은 `apply`가 필요하다고 알립니다.

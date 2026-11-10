@@ -4,12 +4,14 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+// 시험이 임시로 설치한 키트가 진짜 GitHub에 새 버전을 묻지 않게 한다(test/update.mjs는 풀고 로컬 서버를 쓴다)
+process.env.DOC_KIT_NO_UPDATE = '1';
 const cwd = path.join(here, '..');
 const run = (...args) => spawnSync('node', args, {stdio: 'inherit', cwd}).status;
 if (run('tools/bundle.mjs')) process.exit(1);
 let failed = 0;
 let goldenSkipped = false;
-for (const t of ['test/golden.mjs', 'test/editor.mjs', 'test/forms.mjs', 'test/regress.mjs', 'test/windows.mjs', 'test/windows-install.mjs', 'test/repair.mjs']) {
+for (const t of ['test/golden.mjs', 'test/editor.mjs', 'test/forms.mjs', 'test/regress.mjs', 'test/windows.mjs', 'test/windows-install.mjs', 'test/repair.mjs', 'test/update.mjs']) {
   console.log(`\n== ${t}`);
   if (t === 'test/golden.mjs') {
     // 원본 장표가 없어 건너뛰었는지 알려고 출력을 받아 그대로 보여 준다

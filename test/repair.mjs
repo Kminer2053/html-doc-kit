@@ -661,7 +661,7 @@ const before = {react: fs.readFileSync(reactIndex, 'utf-8'), app: fs.readFileSyn
 const st = hook('claude', 'stop', sid);
 ok('훅: 표식 없는 새 HTML을 끝날 때 입힘', run('check', report).status === 0, st.stdout.slice(0, 100));
 ok('훅: 입히기 전 원본 백업', fs.existsSync(path.join(proj, '.doc-kit', 'backup')) && fs.readdirSync(path.join(proj, '.doc-kit', 'backup')).some((n) => n.startsWith('report.html')));
-ok('훅: 스크립트 있는 파일은 그대로 두고 사본', fs.readFileSync(scripted, 'utf-8') === before.scripted && run('check', path.join(proj, 'docs', 'index_편집용.html')).status === 0);
+ok('훅: 스크립트 있는 파일은 그대로 두고 사본 없이 넣을지 물음', fs.readFileSync(scripted, 'utf-8') === before.scripted && !fs.existsSync(path.join(proj, 'docs', 'index_편집용.html')) && /"decision":"block"/.test(st.stdout) && st.stdout.includes('index_편집용.html') && st.stdout.includes('ensure'), st.stdout);
 ok('훅: React public·앱 프로젝트 안 건드림', fs.readFileSync(reactIndex, 'utf-8') === before.react && fs.readFileSync(appIndex, 'utf-8') === before.app);
 ok('훅: 시험 리포트 폴더 안 건드림', fs.readFileSync(cov, 'utf-8') === before.cov);
 ok('훅: 템플릿 안 건드림', fs.readFileSync(tmpl, 'utf-8') === before.tmpl);
@@ -724,16 +724,45 @@ ok('훅: Cursor', run('check', cu).status === 0 && !cs2.stdout.includes('followu
 const bad = hook('claude', 'stop', {session_id: 'x', cwd: '/nonexistent/dir'});
 ok('훅: 이상한 입력에도 작업을 막지 않음', bad.status === 0);
 
-// 12·21·35: 훅이 사본의 사용자 수정을 지키고 알린다. 28: build 입력은 건드리지 않는다
-const dcopy = path.join(proj, 'docs', 'index_편집용.html');
-fs.writeFileSync(dcopy, fs.readFileSync(dcopy, 'utf-8').replace('문서 사이트', '사용자수정표시'));
-const dcopyBefore = fs.readFileSync(dcopy);
+// 묻기: 이 세션에서 이미 물은 파일은 바뀌어도 다시 묻지 않고, 사본도 만들지 않는다. 28: build 입력은 건드리지 않는다
 hook('claude', 'prompt', sid);
 fs.writeFileSync(scripted, plain('', '<h1>문서 사이트 판2</h1><script>start()</script>'));
 hook('claude', 'post', {...sid, tool_name: 'Write', tool_input: {file_path: scripted}});
 const stc = hook('claude', 'stop', sid);
-const dnew = path.join(proj, 'docs', 'index_편집용_2.html');
-ok('35 훅: 고친 사본을 덮어쓰지 않고 새 이름으로 내고 알림', dcopyBefore.equals(fs.readFileSync(dcopy)) && fs.existsSync(dnew) && fs.readFileSync(dnew, 'utf-8').includes('판2') && stc.stdout.includes('index_편집용_2.html') && stc.stdout.includes('사용자가 고친'), stc.stdout);
+ok('묻기: 이미 물은 파일은 다시 묻지 않음', !stc.stdout.includes('decision') && !fs.existsSync(path.join(proj, 'docs', 'index_편집용.html')) && fs.readFileSync(scripted, 'utf-8').includes('판2') && !fs.readFileSync(scripted, 'utf-8').includes('data-doc-kit'), stc.stdout);
+// 묻기: 요청 글로 문서인지 가늠한다
+{
+  const turn = (agent, id, prompt, name, extra = {}) => {
+    // 세션마다 폴더를 따로 쓴다(같은 폴더면 끝날 때 훑기가 다른 세션의 파일까지 잡는다)
+    const dir = path.join(proj, 'ask', id);
+    fs.mkdirSync(dir, {recursive: true});
+    const sidX = {session_id: id, conversation_id: id, cwd: dir, workspace_roots: [dir]};
+    hook(agent, 'prompt', {...sidX, prompt});
+    const f = path.join(dir, name);
+    fs.writeFileSync(f, plain('', `<h1>${WORD}</h1>`));
+    hook(agent, 'post', agent === 'cursor' ? {...sidX, file_path: f} : {...sidX, tool_name: 'Write', tool_input: {file_path: f}});
+    return {f, out: hook(agent, 'stop', {...sidX, ...extra}).stdout};
+  };
+  const game = turn('claude', 'ia', '간단한 블록 쌓기 게임을 HTML로 만들어줘', 'game.html');
+  ok('묻기: 게임 요청이면 넣지 않고 모델에게 묻게 함', !fs.readFileSync(game.f, 'utf-8').includes('data-doc-kit') && /"decision":"block"/.test(game.out) && game.out.includes('game.html') && game.out.includes('ensure'), game.out);
+  hook('claude', 'prompt', {session_id: 'ia', cwd: path.join(proj, 'ask', 'ia'), prompt: '색을 바꿔줘'});
+  const again2 = hook('claude', 'stop', {session_id: 'ia', cwd: path.join(proj, 'ask', 'ia')}).stdout;
+  ok('묻기: 물은 뒤 다음 턴에 그 파일을 다시 묻거나 넣지 않음', !again2.includes('decision') && !fs.readFileSync(game.f, 'utf-8').includes('data-doc-kit'), again2);
+  const rep1 = turn('claude', 'ib', '분기 실적 보고서를 HTML로 작성해줘', 'q.html');
+  ok('묻기: 보고서 요청이면 묻지 않고 넣음', run('check', rep1.f).status === 0 && !rep1.out.includes('decision'), rep1.out);
+  const rep2 = turn('claude', 'ib', '표 하나 더 넣어줘', 'q2.html');
+  ok('묻기: 낱말 없는 이어 요청은 앞의 판단(문서)을 이음', run('check', rep2.f).status === 0 && !rep2.out.includes('decision'), rep2.out);
+  const vague = turn('claude', 'ic', '이 내용 HTML로 만들어줘', 'v.html');
+  ok('묻기: 문서인지 애매하면 물음', !fs.readFileSync(vague.f, 'utf-8').includes('data-doc-kit') && /"decision":"block"/.test(vague.out), vague.out);
+  const kit = turn('claude', 'ig', '편집기 넣은 HTML로 만들어줘', 'k.html');
+  ok('묻기: 편집기·뷰어를 말하면 넣음', run('check', kit.f).status === 0, kit.out);
+  const active = turn('claude', 'id', '계산기 웹앱 만들어줘', 'calc.html', {stop_hook_active: true});
+  ok('묻기: 훅으로 이어 가는 중이면 다시 막지 않고 알리기만 함', !active.out.includes('decision') && active.out.includes('systemMessage') && active.out.includes('calc.html'), active.out);
+  const cx = turn('codex', 'ie', 'make a small timer app in html', 'timer.html');
+  ok('묻기: Codex도 decision:block으로 물음', /"decision":"block"/.test(cx.out) && cx.out.includes('timer.html'), cx.out);
+  const cu = turn('cursor', 'if', '퀴즈 페이지 만들어줘', 'quiz.html');
+  ok('묻기: Cursor는 followup_message로 물음', cu.out.includes('followup_message') && cu.out.includes('quiz.html') && cu.out.includes('묻고') && !cu.out.includes('calc.html'), cu.out);
+}
 hook('claude', 'prompt', sid);
 const inb = path.join(proj, 'in_body.html');
 fs.writeFileSync(inb, '<section data-page data-title="1장"><p>조각</p></section>');
@@ -1263,7 +1292,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     ok('6 rm으로 지운 파일은 알리지 않음', !o5.includes('tmp.html'), o5);
   }
 
-  // 7·20·9·19·43: 알림. 사본 규칙은 유지한다
+  // 7·20·9·19·43: 알림. 스크립트 있는 파일은 사본 없이 묻는다
   {
     const cur = path.join(root, `cur${n}`);
     fs.mkdirSync(cur, {recursive: true});
@@ -1275,8 +1304,8 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     fs.writeFileSync(offf, plain('<meta name="doc-kit" content="off">', '<p>끔</p>'));
     hk('cursor', 'post', {...cid, command: 'python3 gen.py'});
     const c = hk('cursor', 'stop', cid).stdout;
-    ok('7 사본 규칙은 그대로', !hasKit(dash) && hasKit(path.join(cur, 'dash_편집용.html')));
-    ok('7·20 Cursor도 사본·제외·미실행·경고를 알림', c.includes('followup_message') && c.includes('dash_편집용.html') && c.includes('off.html') && c.includes('미실행') && c.includes('경고'), c);
+    ok('7 스크립트 있는 파일은 그대로 두고 사본 없음', !hasKit(dash) && !fs.existsSync(path.join(cur, 'dash_편집용.html')));
+    ok('7·20 Cursor도 묻기·제외를 알림', c.includes('followup_message') && c.includes('dash.html') && c.includes('dash_편집용.html') && c.includes('off.html'), c);
 
     const s = session();
     s.prompt();
@@ -1298,7 +1327,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
     };
     const files = Object.fromEntries(Object.entries(kinds).map(([k, v]) => [k, s2.write(`${k}.html`, v)]));
     const o2 = s2.stop();
-    ok('43 on*, iframe, object, embed는 제자리 대신 사본', ['onclick', 'frame', 'obj', 'emb'].every((k) => !hasKit(files[k]) && hasKit(path.join(s2.dir, `${k}_편집용.html`))), o2);
+    ok('43 on*, iframe, object, embed는 그대로 두고 묻기', ['onclick', 'frame', 'obj', 'emb'].every((k) => !hasKit(files[k]) && !fs.existsSync(path.join(s2.dir, `${k}_편집용.html`)) && o2.includes(`${k}.html`)) && /"decision":"block"/.test(o2), o2);
     ok('43 주석·글자 속 script는 스크립트가 아님', hasKit(files.comment));
 
     const s3 = session();
@@ -1492,7 +1521,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       const out = a.stop();
       ok(`R8 언어 신호 ${marker}만 있으면 제자리에서 입힘`, hasKit(f) && !fs.existsSync(path.join(a.dir, 'report_편집용.html')), out);
     }
-    // R8: 서버 웹 프레임워크 이름이 있으면 앱 폴더 밖 HTML은 덮어쓰지 않고 _편집용 사본을 만든다
+    // R8: 서버 웹 프레임워크 이름이 있으면 앱 폴더 밖 HTML은 건드리지 않고 넣을지 묻는다(사본 명령을 알려 줌)
     for (const [marker, text, name] of [
       ['requirements.txt', 'numpy\nFlask==3.0\n', 'Flask'],
       ['pyproject.toml', '[project]\ndependencies = ["django>=5"]\n', 'django'],
@@ -1509,7 +1538,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       const before = fs.readFileSync(f);
       const out = a.stop();
       const copy = path.join(a.dir, 'index_편집용.html');
-      ok(`R8 ${marker}의 웹 프레임워크(${name})면 원본은 두고 사본을 만들어 알림`, before.equals(fs.readFileSync(f)) && hasKit(copy) && out.includes('index_편집용.html') && out.includes(name), out);
+      ok(`R8 ${marker}의 웹 프레임워크(${name})면 원본은 두고 묻기`, before.equals(fs.readFileSync(f)) && !fs.existsSync(copy) && out.includes('index_편집용.html') && out.includes(name), out);
     }
     // P2: 의존성 선언 자리에서만 이름을 찾는다. 설명·주석·흔한 낱말, HTTP 클라이언트 aiohttp는 신호가 아니다
     for (const [marker, text] of [
@@ -1546,9 +1575,9 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       a.prompt();
       const f = a.write('index.html');
       const out = a.stop();
-      ok(`P2 ${marker}의 의존성 선언(${name})은 웹 프레임워크로 봄`, !hasKit(f) && hasKit(path.join(a.dir, 'index_편집용.html')) && out.includes(name), out);
+      ok(`P2 ${marker}의 의존성 선언(${name})은 웹 프레임워크로 봄`, !hasKit(f) && !fs.existsSync(path.join(a.dir, 'index_편집용.html')) && out.includes(name), out);
     }
-    // N1: 서버 웹 프레임워크 프로젝트에서 앱 폴더 안은 빼고, 스크립트가 앱 폴더 밖에 만든 HTML은 사본을 만든다
+    // N1: 서버 웹 프레임워크 프로젝트에서 앱 폴더 안은 빼고, 스크립트가 앱 폴더 밖에 만든 HTML은 묻는다
     {
       const a = session();
       a.put('requirements.txt', 'flask==3\n');
@@ -1557,7 +1586,7 @@ ok('제거: 기존 설정만 남음', cl2.theme === 'dark' && JSON.stringify(cl2
       const rep = a.put('reports/r.html');
       a.bash('python3 gen.py');
       const out = a.stop();
-      ok('N1 flask 프로젝트의 templates/는 빼고 알림, 그 밖은 사본', !hasKit(tpl) && out.includes('templates/') && out.includes('flask') && !hasKit(rep) && hasKit(path.join(a.dir, 'reports', 'r_편집용.html')), out);
+      ok('N1 flask 프로젝트의 templates/는 빼고 알림, 그 밖은 묻기', !hasKit(tpl) && out.includes('templates/') && out.includes('flask') && !hasKit(rep) && !fs.existsSync(path.join(a.dir, 'reports', 'r_편집용.html')) && out.includes('r.html'), out);
     }
     // N1: 템플릿 엔진·문서 생성기·노트북 이름은 웹앱 신호가 아니다
     for (const [marker, text] of [
