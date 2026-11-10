@@ -127,6 +127,22 @@ const WARNINGS_PER_FILE = 5;
 const STALE_MS = 12 * 3600 * 1000; // 이보다 오래된 기준 시각은 이어 쓰지 않는다(며칠 뒤 재개한 세션)
 const budgetMs = () => Number(process.env.DOC_KIT_HOOK_BUDGET_MS) || 60000; // 훅 제한 120초 안에 끝내려는 처리 시간
 const isHtml = (f) => /\.html?$/i.test(f);
+// 사용자의 요청 글로 이번 HTML이 문서인지 가늠한다. 'doc'이면 끝날 때 키트를 넣고, 'app'이나 'none'이면 넣지 않고 사용자에게 묻는다.
+// 키트를 직접 말했으면 문서로 보고, 프로그램·웹페이지 낱말이 있으면 문서 낱말이 함께 있어도 묻는다(묻는 쪽이 안전하다)
+const KIT_WORDS = /doc-kit|뷰어|편집기/i;
+const APP_WORDS = /게임|웹\s*앱|웹\s*사이트|홈페이지|사이트|랜딩|어플|애플리케이션|앱|계산기|타이머|프로그램|도구|툴|시뮬레이|위젯|인터랙티브|애니메이션|퀴즈|컴포넌트|템플릿|로그인|채팅|플레이어|\b(?:games?|apps?|web\s*apps?|websites?|sites?|landing|calculator|timer|tool|widget|interactive|animation|quiz|component|template|simulator|canvas|three\.js|dashboard)\b/i;
+const DOC_WORDS = /보고서|리포트|장표|슬라이드|발표|프레젠테이션|피티|회의록|의사록|소개\s*자료|자료|문서|정리|요약|브리핑|제안서|기획서|계획서|안내문|공지|뉴스레터|백서|매뉴얼|설명서|안내서|가이드|이력서|보도\s*자료|논문|노트|리뷰|분석|현황|\b(?:report|slides?|deck|presentation|minutes|document|memo|brief(?:ing)?|proposal|newsletter|whitepaper|handout|summary|notes?)\b/i;
+// 다음 턴의 판단. 요청 글이 없거나 낱말이 없으면 앞 턴의 판단을 잇는다("표 하나 더 넣어줘" 같은 이어 고치기)
+const nextIntent = (prev, text) => {
+  const c = classifyPrompt(text);
+  return c === null || (c === 'none' && prev) ? prev : c;
+};
+export function classifyPrompt(text) {
+  if (typeof text !== 'string' || !text.trim()) return null;
+  if (KIT_WORDS.test(text)) return 'doc';
+  if (APP_WORDS.test(text)) return 'app';
+  return DOC_WORDS.test(text) ? 'doc' : 'none';
+}
 const statOf = (f) => {
   try {
     return fs.statSync(f);
@@ -1075,7 +1091,8 @@ function hasTemplateDirective(source) {
 }
 const newerThanFile = (a, b) => (statOf(a)?.mtimeMs ?? 0) > (statOf(b)?.mtimeMs ?? Infinity);
 
-export async function handleFile(file, cwd) {
+// intent: 요청 글로 가늠한 것('doc'·'app'·'none'). 요청 글을 받지 못한 실행(Cursor CLI 등)은 undefined이고 문서로 본다
+export async function handleFile(file, cwd, intent) {
   const parts = path.resolve(file).split(path.sep);
   if (parts.includes('.doc-kit')) {
     // 키트의 작업 파일은 입히지 않는다. 본문을 고치고 apply를 잊었으면 알린다
@@ -1102,16 +1119,39 @@ export async function handleFile(file, cwd) {
     const r = await ensure(file, {});
     return {file, kind: r.changed ? 'repaired' : 'ok', result: r};
   }
-  const scripted = !isKit && hasOwnScript(source);
-  // 웹 프레임워크 프로젝트에서는 앱 폴더 밖이어도 앱이 쓰는 파일일 수 있어 덮어쓰지 않는다
-  if (scripted || (!isKit && signals.web)) {
-    const copy = path.join(path.dirname(file), `${path.basename(file, path.extname(file))}_편집용.html`);
-    if (fs.existsSync(copy) && fs.statSync(copy).mtimeMs >= fs.statSync(file).mtimeMs) return {file, kind: 'ok'};
-    const r = await ensure(file, {output: copy});
-    return {file: r.file, kind: 'copied', source: file, reason: scripted ? '자체 스크립트나 삽입 요소가 있어' : `${signals.web}가 있는 프로젝트라 앱 파일일 수 있어`, result: r};
+  // 키트가 없는 HTML은 문서가 분명할 때만 넣는다. 그 밖은 건드리지 않고(사본도 만들지 않고) 넣을지 사용자에게 묻는다.
+  // 스크립트가 있는 파일은 단독 실행 프로그램일 수 있고, 웹 프레임워크 프로젝트의 파일은 앱이 쓰는 파일일 수 있다
+  if (!isKit) {
+    const scripted = hasOwnScript(source);
+    const why = scripted
+      ? '자체 스크립트나 삽입 요소가 있어 혼자 도는 프로그램일 수 있습니다'
+      : signals.web
+        ? `${signals.web}가 있는 프로젝트라 앱이 쓰는 파일일 수 있습니다`
+        : intent === 'app'
+          ? '요청이 문서가 아니라 프로그램이나 웹페이지로 보입니다'
+          : intent === 'none'
+            ? '요청만으로는 문서인지 분명하지 않습니다'
+            : null;
+    if (why) return {file, kind: 'ask', reason: why, copy: scripted || !!signals.web};
   }
   const r = await ensure(file, {});
   return {file, kind: 'wrapped', result: r};
+}
+
+// 묻는 파일에 키트를 넣는 명령. 원본을 지켜야 하는 파일(스크립트, 웹 프로젝트)은 사본으로 낸다
+const selfCli = () => path.resolve(process.argv[1] || path.join(HOME(), '.doc-kit', 'bin', 'doc-kit.mjs'));
+const ensureLine = (r) => {
+  const copy = r.copy ? ` -o "${path.join(path.dirname(r.file), `${path.basename(r.file, path.extname(r.file))}_편집용.html`)}"` : '';
+  return `node "${selfCli()}" ensure "${r.file}"${copy}`;
+};
+// 끝날 때 모델에게 넘겨 사용자에게 묻게 하는 글. 지금 넣지 말고 묻기만 하게 한다
+export function askReason(asks) {
+  return [
+    'html-doc-kit: 이번 작업에서 만든 HTML 중 문서인지 분명하지 않은 파일에는 뷰어·편집기(브라우저에서 바로 고치고 저장하는 기능)를 넣지 않았습니다.',
+    ...asks.map((r) => `- ${r.file}: ${r.reason}`),
+    '사용자에게 이 파일에 뷰어·편집기를 넣을지 한 문장으로 묻고 이번 응답을 끝내세요. 지금 넣지 마세요.',
+    `사용자가 원하면 다음을 실행하세요: ${asks.map(ensureLine).join(' / ')}. 원하지 않으면 그대로 둡니다.`,
+  ].join('\n');
 }
 
 // 사람에게 보여 줄 줄을 만든다. urgent는 그냥 넘어가면 안 되는 내용이다(Cursor는 이것만 메시지로 낸다)
@@ -1126,7 +1166,7 @@ function describe(results, state, extra) {
   for (const r of results) {
     const res = r.result;
     if ((r.kind === 'wrapped' || r.kind === 'repaired') && res?.changed !== false) lines.push(`${r.file}에 뷰어·편집기를 넣었습니다${res?.backup ? `. 원본: ${res.backup}` : ''}`);
-    if (r.kind === 'copied') important(`${r.source}에 ${r.reason} 그대로 두고 ${r.file}을 만들었습니다`);
+    if (r.kind === 'ask') important(`${r.file}: ${r.reason} 뷰어·편집기를 넣지 않았습니다. 넣으려면 ${ensureLine(r)}`);
     if (r.note && r.kind !== 'skip') important(r.note);
     (res?.notices || []).forEach(important);
     const warnings = [...new Set(res?.warnings || [])];
@@ -1270,7 +1310,9 @@ export async function runStop(state, cwd) {
       continue;
     }
     try {
-      const r = await handleFile(f, cwd);
+      let r = await handleFile(f, cwd, state.intent);
+      // 이 세션에서 이미 물은 파일은 다시 묻지 않는다(사용자가 원하지 않았을 수 있다)
+      if (r.kind === 'ask' && (state.asked || []).includes(r.file)) r = {file: f, kind: 'skip', note: null};
       results.push(r);
       for (const p of [f, r.file]) {
         const st = statOf(p);
@@ -1282,7 +1324,8 @@ export async function runStop(state, cwd) {
   }
   if (pending.length) extra.push(`시간이 모자라 다음 턴 끝에 다시 봅니다: ${pending.slice(0, SKIP_NOTES_MAX).join(', ')}${pending.length > SKIP_NOTES_MAX ? ` 외 ${pending.length - SKIP_NOTES_MAX}개` : ''}`);
   const {lines, urgent} = describe(results, state, extra);
-  return {results, lines, urgent, pending, handled, failed: results.filter((r) => r.kind === 'error' || r.result?.c6?.status === 'fail')};
+  const asks = results.filter((r) => r.kind === 'ask');
+  return {results, lines, urgent, pending, handled, asks, failed: results.filter((r) => r.kind === 'error' || r.result?.c6?.status === 'fail')};
 }
 
 export async function hook(agent, event) {
@@ -1303,7 +1346,8 @@ export async function hook(agent, event) {
       const s = load(f);
       const now = Date.now();
       const cwd = cwdOf(input);
-      if (!s) store(f, {start: now, turnAt: now, cwd, paths: [], open: true, active: false});
+      const intent = nextIntent(s?.intent, input.prompt);
+      if (!s) store(f, {start: now, turnAt: now, cwd, paths: [], open: true, active: false, ...(intent ? {intent} : {})});
       else {
         const gaps = (s.gaps || []).filter((g) => g.to >= now - STALE_MS);
         if (s.open && s.start) {
@@ -1315,7 +1359,7 @@ export async function hook(agent, event) {
         const paths = s.paths || [];
         const {dirs, ...rest} = s;
         void dirs;
-        store(f, {...rest, start: now, turnAt: now, cwd, open: true, active: false, lastPost: null, gaps: gaps.slice(-5), paths, pathsStart: paths.length ? (s.pathsStart ?? s.start) : null, scriptSince: keep ? s.scriptSince : null, maybe: keep ? s.maybe : [], notes: keep ? s.notes : []});
+        store(f, {...rest, ...(intent ? {intent} : {}), start: now, turnAt: now, cwd, open: true, active: false, lastPost: null, gaps: gaps.slice(-5), paths, pathsStart: paths.length ? (s.pathsStart ?? s.start) : null, scriptSince: keep ? s.scriptSince : null, maybe: keep ? s.maybe : [], notes: keep ? s.notes : []});
       }
     } else if (event === 'post') {
       const s = load(f) || {start: Date.now(), cwd: cwdOf(input), paths: []};
@@ -1347,21 +1391,30 @@ export async function hook(agent, event) {
       }
       const s = loaded || {start: Date.now() - 600000, paths: []};
       const cwd = s.cwd || cwdOf(input);
-      const {lines, urgent, failed, pending, handled} = await runStop(s, cwd);
+      const {lines, urgent, failed, pending, handled, asks} = await runStop(s, cwd);
+      // 물은 파일과 요청의 성격은 세션 동안 이어 간다
+      const keep = {...(s.intent ? {intent: s.intent} : {}), asked: [...new Set([...(s.asked || []), ...asks.map((r) => r.file)])].slice(-50)};
       // 모두 처리한 뒤에야 기준 시각을 옮긴다. 처리 못 한 파일이 있으면 그대로 두어 다음에 다시 찾는다
-      store(f, pending.length ? {...s, cwd, open: false, gaps: [], paths: pending, unknown: [], maybe: [], notes: [], done: {...s.done, ...handled}} : {start: Date.now(), turnAt: s.turnAt, cwd, open: false, active: false, paths: [], done: handled});
+      store(f, pending.length ? {...s, ...keep, cwd, open: false, gaps: [], paths: pending, unknown: [], maybe: [], notes: [], done: {...s.done, ...handled}} : {start: Date.now(), turnAt: s.turnAt, cwd, open: false, active: false, paths: [], done: handled, ...keep});
       if (lines.length) note(lines.join(' / '));
       if (event === 'end') {
         process.stdout.write('{}');
         return;
       }
-      if (lines.length) {
-        const message = 'html-doc-kit: ' + lines.join('\n');
-        if (agent === 'cursor') {
-          // Cursor는 끝날 때 사용자에게 바로 보여 줄 길이 없어 모델을 거쳐 전한다. 평범한 완료는 조용히 넘긴다
-          if (urgent || failed.length) process.stdout.write(JSON.stringify({followup_message: `${message}\n위 내용을 사용자에게 그대로 알려 주세요. 파일을 직접 고치지 마세요.`}));
-          else process.stdout.write('{}');
-        } else process.stdout.write(JSON.stringify({systemMessage: message}));
+      // 묻는 파일은 모델에게 넘겨 사용자에게 묻게 한다(Claude Code·Codex는 decision:block, Cursor는 followup_message).
+      // 이미 훅 때문에 이어 가는 중이면(stop_hook_active) 다시 막지 않고 사용자에게 알리기만 한다
+      const ask = asks.length && !input.stop_hook_active;
+      const other = ask ? lines.filter((l) => !asks.some((r) => l.startsWith(`${r.file}: `))) : lines;
+      const message = other.length ? 'html-doc-kit: ' + other.join('\n') : '';
+      if (agent === 'cursor') {
+        // Cursor는 끝날 때 사용자에게 바로 보여 줄 길이 없어 모델을 거쳐 전한다. 평범한 완료는 조용히 넘긴다
+        const tell = message && (urgent || failed.length) ? `${message}\n위 내용을 사용자에게 그대로 알려 주세요. 파일을 직접 고치지 마세요.` : '';
+        const parts = [tell, ask ? askReason(asks) : ''].filter(Boolean);
+        process.stdout.write(parts.length ? JSON.stringify({followup_message: parts.join('\n')}) : '{}');
+        return;
+      }
+      if (ask || message) {
+        process.stdout.write(JSON.stringify({...(ask ? {decision: 'block', reason: askReason(asks)} : {}), ...(message ? {systemMessage: message} : {})}));
         return;
       }
     }

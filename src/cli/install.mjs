@@ -115,10 +115,11 @@ const writeJson = (f, v) => {
 };
 function rules(cli) {
   return `HTML 문서(보고서, 장표, 회의록, 소개 자료 등 사람이 읽는 HTML 파일)를 만들거나 고칠 때는 html-doc-kit 스킬을 쓴다. Artifact나 다른 게시 기능이 아니라 작업 폴더의 파일로 만든다.
+- 문서가 분명하면 묻지 않고 쓴다. 문서인지 애매하면 뷰어·편집기를 넣을지 먼저 한 번 묻는다. 게임·계산기 같은 단독 실행 프로그램과 웹앱·웹사이트의 HTML에는 쓰지 않는다. 끝날 때 훅이 넣을지 물어보라고 하면 사용자에게 묻고, 원하면 알려 준 명령을 실행한다.
 - 만들기: 본문만 마크다운이나 HTML 조각으로 쓰고 \`node "${cli}" build 본문파일 -o 결과.html\`을 실행한다. 뷰어와 편집기 코드를 직접 쓰지 않는다.
 - 이미 있는 HTML: \`node "${cli}" ensure 파일.html\`
 - 키트 파일 고치기: 통째로 읽지 말고 \`node "${cli}" extract 파일.html\`로 본문을 꺼내 고친 뒤 \`node "${cli}" apply 본문파일 파일.html\`을 실행한다.
-- 끝나면 \`node "${cli}" check 결과.html\`로 확인한다. 웹앱의 HTML 파일에는 쓰지 않는다.`;
+- 끝나면 \`node "${cli}" check 결과.html\`로 확인한다.`;
 }
 function upsertBlock(file, text) {
   fs.mkdirSync(path.dirname(file), {recursive: true});
@@ -161,7 +162,7 @@ const HOOK_EVENTS = {
 // sessionStart·afterFileEdit·afterShellExecution·sessionEnd는 온다. 그래서 세션 시작·끝에도 같은 처리를 건다
 const CURSOR_HOOKS = [['beforeSubmitPrompt', 'prompt'], ['afterFileEdit', 'post'], ['afterShellExecution', 'post'], ['stop', 'stop'], ['sessionStart', 'start'], ['sessionEnd', 'end']];
 // Cursor 지침에만 덧붙인다. Cursor CLI는 승인 목록 밖의 셸 명령을 거절해 build를 못 하는 일이 있다
-const CURSOR_EXTRA = `- HTML 코드를 대화창에 출력하지 말고 작업 폴더의 파일로 쓴다. 셸 명령이 거절돼 build를 못 하면 묻지 말고 완성 HTML 파일을 직접 쓴다. 작업이 끝날 때 훅이 뷰어·편집기를 넣는다.`;
+const CURSOR_EXTRA = `- HTML 코드를 대화창에 출력하지 말고 작업 폴더의 파일로 쓴다. 문서 요청인데 셸 명령이 거절돼 build를 못 하면 묻지 말고 완성 HTML 파일을 직접 쓴다. 작업이 끝날 때 훅이 뷰어·편집기를 넣는다.`;
 const hookFile = (p, a) => ({claude: p.claudeSettings, codex: p.codexHooks, cursor: p.cursorHooks})[a];
 const instructionFile = (p, a) => ({claude: p.claudeMd, codex: p.codexMd, cursor: p.cursorRule})[a];
 const skillDir = (p, a) => (a === 'claude' ? p.claudeSkill : p.agentsSkill);
@@ -285,6 +286,22 @@ function smoke(prefix, env, persist) {
   const cmd = spawnSync(line, {...opts, shell: true});
   const ps = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(line, 'utf16le').toString('base64')], opts);
   return [['cmd.exe', want(cmd)], ['PowerShell', want(ps)]];
+}
+
+// 업데이트가 쓰는 정보. 설치된 실행 파일·스킬 위치, 우리 훅이 있는 에이전트, 훅 명령이 부르는 node
+export const binPath = (home = os.homedir()) => paths(home).bin;
+export const skillDirs = (home = os.homedir()) => [paths(home).claudeSkill, paths(home).agentsSkill];
+export const installedAgents = (home = os.homedir()) => ALL_AGENTS.filter((a) => isInstalled(paths(home), a));
+// 같은 node로 다시 설치해야 훅 명령 글자가 그대로라 Codex 승인이 유지된다. 따옴표 경로가 아니면(Windows의 맨 node) null
+export function hookNode(home = os.homedir()) {
+  const p = paths(home);
+  for (const a of ALL_AGENTS) {
+    for (const c of ourCommands(hooksOf(p, a))) {
+      const m = /^"([^"]+)"\s/.exec(c);
+      if (m && fs.existsSync(m[1])) return m[1];
+    }
+  }
+  return null;
 }
 
 export function doctor({home = os.homedir(), agents, platform = process.platform, env = process.env, probe, readReg} = {}) {

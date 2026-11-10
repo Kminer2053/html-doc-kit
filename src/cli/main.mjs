@@ -1,7 +1,9 @@
+import {spawnSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import {apply, build, check, ensure, extract, upgrade} from './ops.mjs';
 import {doctor, install, uninstall} from './install.mjs';
+import {selfUpdate} from './update.mjs';
 import {hook} from './hook.mjs';
 import {VERSION} from './core.mjs';
 
@@ -14,7 +16,9 @@ const USAGE = `html-doc-kit ${VERSION}: HTML 문서에 뷰어와 편집기를 �
   apply <본문.html> <파일.html> [--shrink]  고친 본문을 완성 파일로 되돌립니다. 쪽을 일부러 줄였으면 --shrink
   upgrade <파일.html>                  키트를 최신으로 바꿉니다
   install | uninstall | doctor         에이전트 설치·제거·점검(--home 경로, --agents claude,codex,cursor)
-공통: --no-browser 브라우저 시험 생략`;
+  update                               새 버전이 있으면 받아 다시 설치합니다
+공통: --no-browser 브라우저 시험 생략
+설치된 키트는 위 문서 명령을 실행할 때 한 시간에 한 번 새 버전을 확인해 스스로 업데이트합니다(DOC_KIT_NO_UPDATE=1이면 끔)`;
 
 function parseArgs(argv) {
   const pos = [];
@@ -56,6 +60,17 @@ function report(r) {
 
 const [cmd, ...rest] = process.argv.slice(2);
 const {pos, o} = parseArgs(rest);
+// 키트를 쓰는 명령에서만 새 버전을 확인한다. 알림은 표준 오류로 내 check --json 같은 출력을 깨지 않는다
+const DOC_COMMANDS = new Set(['build', 'ensure', 'check', 'extract', 'apply', 'upgrade']);
+if (DOC_COMMANDS.has(cmd)) {
+  const u = await selfUpdate();
+  if (u.status === 'updated') {
+    console.error(`알림: html-doc-kit을 ${u.from}에서 ${u.to}로 업데이트했습니다. 새 버전으로 이어서 실행합니다`);
+    const r = spawnSync(process.execPath, [u.bin, ...process.argv.slice(2)], {stdio: 'inherit', env: {...process.env, DOC_KIT_NO_UPDATE: '1'}});
+    process.exit(r.status ?? 1);
+  }
+  if (u.status === 'failed') console.error(`알림: html-doc-kit ${u.latest}이 나왔지만 업데이트하지 못했습니다(${u.reason}). 지금 버전 ${VERSION}으로 계속합니다`);
+}
 try {
   if (cmd === 'build') {
     need(pos[0]);
@@ -94,6 +109,16 @@ try {
     console.log('참고: 훅은 macOS의 Claude Code·Codex·Cursor에서 확인했습니다. Cursor CLI(agent -p)에서는 결과가 ~/.doc-kit/hook.log에만 남습니다. 자세한 범위는 README를 보세요');
   } else if (cmd === 'uninstall') {
     console.log(`제거: ${uninstall(o).join(', ')}`);
+  } else if (cmd === 'update') {
+    const u = await selfUpdate({force: true});
+    const say = {
+      updated: () => `업데이트: ${u.from} → ${u.to}`,
+      latest: () => `최신입니다: ${VERSION}`,
+      offline: () => `새 버전을 확인하지 못했습니다(${u.reason})`,
+      failed: () => `${u.latest}이 나왔지만 업데이트하지 못했습니다(${u.reason})`,
+    }[u.status];
+    console.log(say ? say() : '확인하지 않았습니다');
+    process.exitCode = u.status === 'failed' || u.status === 'offline' ? 1 : 0;
   } else if (cmd === 'doctor') {
     const lines = doctor(o);
     lines.forEach((l) => console.log(l));

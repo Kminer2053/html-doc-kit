@@ -4,3 +4,4 @@ node_modules/
 *.tmp
 src/cli/assets.gen.mjs
 test/out/
+dist/
