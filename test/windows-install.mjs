@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {codexTrusted, doctor, install, nodeToken, parseRegPath, pathNode, persistentPath, probeNode, uninstall} from '../src/cli/install.mjs';
+import {codexTrusted, doctor, install, nodeToken, parseRegPath, pathNode, persistentPath, probeNode, stableNode, uninstall} from '../src/cli/install.mjs';
 import {sweepProfiles} from '../src/cli/browser.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -36,11 +36,21 @@ const win = (p) => ({PATH: p, PATHEXT: '.COM;.EXE;.BAT;.CMD'});
 const reg = (sys, user = '') => (key) => (key.startsWith('HKLM') ? sys : user);
 // 영구 PATH와 지금 셸 PATH가 같은 Windows
 const W = (p, extra = {}) => ({platform: 'win32', env: win(p), probe, readReg: reg(p), ...extra});
-const quoted = `"${process.execPath}"`;
+const quoted = `"${stableNode(process.execPath)}"`; // 이 맥처럼 Homebrew node면 opt 링크
+const quotedHere = `"${stableNode(process.execPath)}"`;
 
 try {
   // 1. 첫 낱말
-  ok('Mac·Linux는 예전 그대로 따옴표 경로', nodeToken({platform: 'darwin', env: win(good), probe}) === quoted && nodeToken({platform: 'linux', env: win(good), probe}) === quoted);
+  ok('Mac·Linux는 따옴표 경로', nodeToken({platform: 'darwin', env: win(good), probe}) === quotedHere && nodeToken({platform: 'linux', env: win(good), probe}) === quotedHere);
+  {
+    const cellar = '/opt/homebrew/Cellar/node/26.13.0_2/bin/node';
+    const has = (want) => (f) => f === want;
+    ok('Homebrew 버전 폴더의 node는 opt 링크로', stableNode(cellar, has('/opt/homebrew/opt/node/bin/node')) === '/opt/homebrew/opt/node/bin/node');
+    ok('node@22 같은 formula도 opt 링크로', stableNode('/usr/local/Cellar/node@22/22.11.0/bin/node', has('/usr/local/opt/node@22/bin/node')) === '/usr/local/opt/node@22/bin/node');
+    ok('opt 링크가 없으면 그대로', stableNode(cellar, () => false) === cellar);
+    ok('Homebrew가 아니면 그대로', stableNode('/Users/a/.nvm/versions/node/v22.11.0/bin/node', () => true) === '/Users/a/.nvm/versions/node/v22.11.0/bin/node');
+    ok('nodeToken도 opt 링크를 씀', nodeToken({platform: 'darwin', execPath: cellar, exists: has('/opt/homebrew/opt/node/bin/node')}) === '"/opt/homebrew/opt/node/bin/node"');
+  }
   ok('Windows: PATH에 Node 24 node.exe가 있으면 맨 node', nodeToken(W(good)) === 'node');
   ok('Windows: Path 키 이름의 대소문자가 달라도 찾음', nodeToken({...W(good), env: {Path: good, PathExt: '.EXE'}}) === 'node');
   ok('Windows: PATH의 node가 22 미만이면 따옴표 경로', nodeToken(W(old)) === quoted);
@@ -101,7 +111,7 @@ try {
   // 4. 따옴표 꼴로 되돌아간 설치는 주의를 띄운다
   install({home, ...W(empty)});
   const fallback = ours(JSON.parse(fs.readFileSync(path.join(home, '.claude', 'settings.json'), 'utf-8')));
-  ok('Windows: PATH에 node가 없으면 따옴표 경로로 설치', fallback.length === 3 && fallback.every((c) => c.startsWith(`"${process.execPath}" "${bin}" hook `)));
+  ok('Windows: PATH에 node가 없으면 따옴표 경로로 설치', fallback.length === 3 && fallback.every((c) => c.startsWith(`${quoted} "${bin}" hook `)));
   const dQuoted = doctor({home, ...W(empty)});
   ok('doctor(Windows): 따옴표 꼴이면 PowerShell 주의', dQuoted.some((l) => l.startsWith('주의') && l.includes('PowerShell')), dQuoted.join('\n'));
   ok('doctor: 따옴표 경로의 Node가 있으면 Node 경로 없음이 아님', !dQuoted.some((l) => l.includes('Node 경로 없음')), dQuoted.join('\n'));

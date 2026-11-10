@@ -8,7 +8,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ![Node 22+](https://img.shields.io/badge/Node-22%2B-339933?logo=nodedotjs&logoColor=white)
 ![에이전트](https://img.shields.io/badge/에이전트-Claude%20Code·Codex·Cursor-5E35B1)
 ![출력](https://img.shields.io/badge/출력-HTML%20한%20파일-267A68)
-![키트](https://img.shields.io/badge/키트-1.2.0-2563EB)
+![키트](https://img.shields.io/badge/키트-1.2.1-2563EB)
 ![확인](https://img.shields.io/badge/확인-macOS·Windows-6B7280)
 [![License: MIT](https://img.shields.io/badge/License-MIT-EAB308)](LICENSE)
 
