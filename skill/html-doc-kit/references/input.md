@@ -38,7 +38,7 @@ Notes:
 
 - 쪽: `data-page`가 있는 요소, 없으면 `class="slide"`나 `class="page"`, 없으면 맨 위 `<section>` 2개 이상, 없으면 전체가 한 쪽입니다.
 - 쪽 속성: `data-title`, `data-notes`, `data-key`(핵심 문장), `data-seconds`, `data-type`, `data-w`·`data-h`(px).
-- 스타일은 `<style>`에 씁니다. 쪽 안에만 적용됩니다. 스타일이 없으면 기본 모양이 입혀집니다.
+- 스타일은 `<style>`에 씁니다. 쪽 안에만 적용됩니다. 스타일이 없으면 기본 모양이 입혀집니다. 마크다운 본문은 `<style>`을 덧붙여도 기본 모양 위에 얹히니 표 글자 크기 같은 조정만 쓰세요. HTML 본문에 스타일을 쓰면 기본 모양 없이 그 스타일만 씁니다.
 - `vw`·`vh`는 창이 아니라 쪽 크기 기준으로 바뀝니다. `background:url(그림.png)`와 `<svg><image href="그림.png">`의 로컬 그림도 파일 안에 들어갑니다.
 - 나눠 쓰는 본문은 마크다운을 권장합니다. HTML 본문 파일은 build나 apply에 넣은 뒤로 결과물로 치지 않지만, 그 전에 턴이 끝나면 키트가 입혀질 수 있습니다.
 

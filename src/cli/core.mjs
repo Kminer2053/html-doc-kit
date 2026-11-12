@@ -267,7 +267,8 @@ export function pagesFromHtml(source, baseDir, opts, warn) {
       out.push({html: inner(body), kind: 'auto', notes: '', key: '', fromSource: false});
     }
   }
-  return {pages: out, css, docTitle};
+  // extract가 마크다운 출신 문서에 남기는 표식. 덧붙인 스타일이 있어도 기본 모양을 지킨다
+  return {pages: out, css, docTitle, ...(metaOf(head, 'doc-style') === 'plain' ? {plain: true} : {})};
 }
 
 // 마크다운: 앞머리(--- title/type ---), 쪽 구분(--- 줄), 쪽 끝의 "Notes:" 이후는 메모
@@ -295,7 +296,8 @@ export function pagesFromMarkdown(source, baseDir, opts, warn) {
     cssAll += sanitize(tree, baseDir, warn);
     parts.push({html: inner(bodyOf(tree)), kind, notes, key: '', fromSource: false});
   }
-  return {pages: parts, css: cssAll, docTitle: opts.title || meta.title || ''};
+  // 마크다운은 기본 모양을 바탕으로 쓴다. 본문에 넣은 <style>은 그 위에 덧붙이는 조정으로 본다
+  return {pages: parts, css: cssAll, docTitle: opts.title || meta.title || '', plain: true};
 }
 
 const pageSize = (p) => {
@@ -304,7 +306,8 @@ const pageSize = (p) => {
   return {...s, name: SIZES[p.kind] ? p.kind : 'auto'};
 };
 
-export function assemble({pages, css, docTitle, docId, rev, base, extraBook}) {
+// plain: 기본 모양(base.css)을 쓸지. 정하지 않았으면 문서 스타일이 없을 때만 쓴다
+export function assemble({pages, css, docTitle, docId, rev, base, extraBook, plain: wantPlain}) {
   const sizes = new Map();
   const bookPages = [];
   const sections = pages.map((p, i) => {
@@ -328,7 +331,7 @@ export function assemble({pages, css, docTitle, docId, rev, base, extraBook}) {
     return `<section class="dk-page" id="dk-p${i + 1}" data-dk-size="${esc(size.name)}"${size.h ? ' data-dk-fixed=""' : ''} style="${style}"><div class="dk-page-inner">${inner(b)}</div></section>`;
   });
   const title = docTitle || bookPages[0]?.title || '문서';
-  const plain = !css.replace(/@font-face\s*\{[^}]*\}/gi, '').trim();
+  const plain = wantPlain ?? !css.replace(/@font-face\s*\{[^}]*\}/gi, '').trim();
   const pageCss = [...sizes].map(([n, s]) => (s.h ? `@page ${n}{size:${s.w}px ${s.h}px;margin:0}` : `@page ${n}{size:A4;margin:0}`)).join('');
   const book = JSON.stringify({title, pages: bookPages, ...(extraBook || {})}).replace(/</g, '\\u003c');
   return `<!doctype html>
@@ -441,6 +444,7 @@ export function readKit(source, baseDir, opts, warn) {
     pages,
     css,
     docTitle: book.title || '',
+    ...(docEl && hasAttr(docEl, 'data-dk-plain') ? {plain: true} : {}),
     kit: {version: root ? attr(root, 'data-doc-kit') : null, id: root ? attr(root, 'data-doc-id') : null, rev: Number(root ? attr(root, 'data-doc-rev') : 0) || 0, base, extraBook: book.minutes ? {minutes: book.minutes} : undefined},
   };
 }
@@ -457,6 +461,7 @@ export function render(src, opts = {}) {
     rev: (src.kit?.rev || 0) + 1,
     base: '',
     extraBook: {...(src.kit?.extraBook || {}), ...(opts.minutes ? {minutes: opts.minutes} : {})},
+    plain: opts.dropCss ? true : src.plain,
   });
 }
 
@@ -476,7 +481,8 @@ export function extractBody(source, warn, baseDir = '.') {
     const notes = p.notes ? `\n<aside data-notes-block="">${esc(p.notes)}</aside>` : '';
     return `<section ${a.join(' ')}>\n${p.html}${notes}\n</section>`;
   });
-  const text = `<!-- html-doc-kit 본문 파일. 고친 뒤 apply로 되돌립니다. dk-asset:번호는 그림 자리이니 그대로 두세요 -->\n<title>${esc(src.docTitle)}</title>\n<style>${src.css}</style>\n${bits.join('\n')}\n`;
+  const plainMeta = src.plain ? '\n<meta name="doc-style" content="plain">' : '';
+  const text = `<!-- html-doc-kit 본문 파일. 고친 뒤 apply로 되돌립니다. dk-asset:번호는 그림 자리이니 그대로 두세요 -->\n<title>${esc(src.docTitle)}</title>${plainMeta}\n<style>${src.css}</style>\n${bits.join('\n')}\n`;
   const assets = [];
   const seen = new Map();
   const body = text.replace(/data:[^;,"'\s)]+(?:;[^;,"'\s)]+)*;base64,[A-Za-z0-9+/=]+/g, (uri) => {
