@@ -27,10 +27,13 @@ body.dk-js:not(.dk-reading) #dk-document{justify-content:center}
 .dk-ui button[aria-pressed=true]{background:#096c95}
 .dk-ui button:disabled{opacity:.4}
 .dk-controls{position:fixed;top:0;left:0;right:0;z-index:900;height:58px;display:flex;gap:8px;align-items:center;padding:8px 16px;background:#142c43}
-.dk-controls select{min-width:120px;max-width:610px;flex:1}
+.dk-controls select{min-width:90px;max-width:610px;flex:1}
+/* 창이 좁아도 단추 글자가 세로로 쪼개지지 않게: 단추는 줄이지 않고 상태 글자부터 줄인다. 그래도 넘치면 막대를 옆으로 민다 */
+.dk-controls{overflow-x:auto;scrollbar-width:none}
+.dk-controls button{flex:none;white-space:nowrap}
 #dk-position{font-variant-numeric:tabular-nums;min-width:68px}
 #dk-elapsed.dk-late{color:#ffd283}
-#dk-status{flex:none;width:190px;font-size:12px;color:#cfdeeb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#dk-status{flex:0 1 190px;min-width:0;font-size:12px;color:#cfdeeb;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #dk-status.dk-warn{color:#ffd283;font-weight:700}
 .dk-foot{position:fixed;bottom:0;left:0;right:0;z-index:900;height:28px;padding:6px 16px;font-size:11px;color:#cfdeeb;background:#24384c;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dk-speaker{width:370px;flex:none;background:#f2f6fa;border:1px solid #b5c9da;border-radius:5px;padding:20px;overflow:auto;font-size:16px;line-height:1.85;color:#183b57}

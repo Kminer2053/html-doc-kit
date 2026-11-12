@@ -327,6 +327,24 @@ fs.writeFileSync(ef('dash.html'), plain('', `<h1>${WORD}판4</h1><script>x()</sc
 run('ensure', ef('dash.html'), '-o', dashCopy, '--no-browser');
 ok('12·21·35 새 이름 사본을 안 고쳤으면 그 이름을 다시 씀(이름이 늘지 않음)', has(second, `${WORD}판4`) && !fs.existsSync(ef('dash_편집용_3.html')) && edited.equals(fs.readFileSync(dashCopy)));
 
+// 기본 모양: 마크다운 문서는 본문에 <style>을 덧붙여도 기본 모양을 지키고, extract·apply 뒤에도 유지한다. 자체 스타일이 있는 HTML은 쓰지 않는다
+{
+  const isPlain = (f) => /<main id="dk-document" data-dk-plain=""/.test(fs.readFileSync(f, 'utf-8'));
+  fs.writeFileSync(ef('tweak.md'), `# ${WORD}\n\n<style>table{font-size:14px}</style>\n\n| 가 | 나 |\n|---|---|\n| 1 | 2 |\n`);
+  run('build', ef('tweak.md'), '-o', ef('tweak.html'), '--no-browser');
+  const tweak = fs.readFileSync(ef('tweak.html'), 'utf-8');
+  ok('기본 모양: 마크다운에 덧붙인 style이 있어도 기본 모양을 씀', isPlain(ef('tweak.html')) && tweak.includes('font-size:14px'), tweak.slice(0, 300));
+  const ex = run('extract', ef('tweak.html'));
+  const bodyFile = /본문: (.+)/.exec(ex.stdout)?.[1]?.trim();
+  ok('기본 모양: 본문 파일에 표식이 남음', !!bodyFile && fs.readFileSync(bodyFile, 'utf-8').includes('<meta name="doc-style" content="plain">'), ex.stdout);
+  fs.writeFileSync(bodyFile, fs.readFileSync(bodyFile, 'utf-8').replace('<td>1</td>', '<td>하나</td>'));
+  const ap = run('apply', bodyFile, ef('tweak.html'), '--no-browser');
+  ok('기본 모양: apply 뒤에도 유지', ap.status === 0 && isPlain(ef('tweak.html')) && has(ef('tweak.html'), '하나'), ap.stdout + ap.stderr);
+  fs.writeFileSync(ef('designed.html'), plain('<style>body{background:#000}h1{color:red}</style>', `<h1>${WORD}</h1>`));
+  run('ensure', ef('designed.html'), '--no-browser');
+  ok('기본 모양: 자체 스타일이 있는 HTML은 쓰지 않음', !isPlain(ef('designed.html')));
+}
+
 // 47: ensure는 마크다운을 쓰지 않는다
 fs.writeFileSync(ef('m.md'), `# ${WORD}\n`);
 const mdBefore = fs.readFileSync(ef('m.md'));
@@ -1781,14 +1799,14 @@ if (findChrome()) {
   run('extract', out, '-o', body);
   const r2 = run('apply', body, out, '--no-browser');
   ok('62 extract·apply 뒤에도 기본 모양 유지', r2.status === 0 && plainMain(out), r2.stdout + r2.stderr);
-  // 문서 스타일을 더했다가 다시 빼면 기본 모양으로 돌아온다
+  // 마크다운 문서는 문서 스타일을 더해도 기본 모양을 지키고(1.2.2), 빼도 그대로다
   fs.writeFileSync(body, '<style>p{color:red}</style>' + fs.readFileSync(body, 'utf-8'));
   run('apply', body, out, '--no-browser');
   const styled = !plainMain(out);
   run('extract', out, '-o', body);
   fs.writeFileSync(body, fs.readFileSync(body, 'utf-8').replace(/<style>[^<]*color:red[^<]*<\/style>/, ''));
   run('apply', body, out, '--no-browser');
-  ok('62 문서 스타일을 넣으면 기본 모양을 끄고, 빼면 다시 켬', styled && plainMain(out));
+  ok('62 마크다운 문서는 문서 스타일을 더해도 기본 모양 유지, 빼도 유지', !styled && plainMain(out));
   const own = path.join(d, 'own.html');
   fs.writeFileSync(own, '<style>p{color:red}</style><p>x</p><svg><style>.a{fill:red}</style><text class="a">1</text></svg>');
   run('build', own, '-o', path.join(d, 'own2.html'), '--no-browser');

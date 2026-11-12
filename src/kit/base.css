@@ -1,15 +1,20 @@
-/* 문서에 자체 스타일이 없을 때만 쓰는 기본 모양 */
-:where(#dk-document[data-dk-plain] .dk-page-inner){font:16px/1.6 DocKitFull,'Noto Sans KR','Noto Sans CJK KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#182d42;padding:56px 64px}
+/* 기본 모양. 문서에 자체 스타일이 없거나 마크다운으로 쓴 문서에 쓴다(덧붙인 스타일이 이긴다) */
+:where(#dk-document[data-dk-plain] .dk-page-inner){font:16px/1.7 DocKitFull,'Noto Sans KR','Noto Sans CJK KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1d2b38;padding:56px 64px;word-break:keep-all;overflow-wrap:anywhere}
 :where(#dk-document[data-dk-plain] .dk-page[data-dk-size=slide] .dk-page-inner){font-size:28px;padding:72px 96px}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1){font-size:1.9em;line-height:1.25;margin:0 0 .6em;color:#123451}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h2){font-size:1.4em;line-height:1.3;margin:1.1em 0 .5em;color:#1b5790}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h3){font-size:1.15em;margin:1em 0 .4em;color:#1b5790}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(p){margin:0 0 .8em}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(ul,ol){margin:0 0 .8em;padding-left:1.5em}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(table){border-collapse:collapse;width:100%;margin:0 0 1em}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th,td){border:1px solid #9dabb8;padding:.4em .6em;vertical-align:top}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th){background:#123451;color:#fff;text-align:left}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1){font-size:1.9em;line-height:1.3;margin:0 0 .8em;color:#123451}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h2){font-size:1.35em;line-height:1.35;margin:1.6em 0 .6em;padding-bottom:.3em;border-bottom:2px solid #d6e1eb;color:#1b5790}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h3){font-size:1.12em;line-height:1.4;margin:1.3em 0 .5em;color:#1b5790}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1,h2,h3):first-child{margin-top:0}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(p){margin:0 0 .9em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(ul,ol){margin:0 0 1em;padding-left:1.5em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li+li){margin-top:.3em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(strong,b){color:#0f2a44}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(table){border-collapse:collapse;width:100%;margin:0 0 1.2em;font-size:.94em;line-height:1.6}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th,td){border:1px solid #c9d5e0;padding:.55em .75em;vertical-align:top}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th){background:#123451;color:#fff;text-align:left;font-weight:700;border-color:#123451}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(tbody tr:nth-child(even) td){background:#f5f8fb}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(img,svg){max-width:100%;height:auto}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(blockquote){margin:0 0 .8em;padding:.4em 1em;border-left:4px solid #1887ae;background:#eef5fa}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(blockquote){margin:0 0 1em;padding:.6em 1em;border-left:4px solid #1887ae;background:#eef5fa}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(hr){border:0;border-top:1px solid #d6e1eb;margin:1.6em 0}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(code){font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:#eef2f6;padding:.1em .3em;border-radius:3px}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre){background:#eef2f6;padding:1em;overflow:auto}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre){background:#eef2f6;padding:1em;overflow:auto;word-break:normal}
