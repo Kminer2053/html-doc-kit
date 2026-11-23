@@ -14,9 +14,9 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 
 [바로 시작](#5분-시작) · [사용 예시](#이렇게-씁니다-초간단-3단계) · [결과물](#결과물은-이렇게-생겼습니다) · [문서](#문서)
 
-<a href="docs/media/html-doc-kit-usage.mp4"><img src="docs/media/usage-poster.png" width="720" alt="html-doc-kit 사용 설명 영상(2분 37초)"></a>
+<a href="docs/media/html-doc-kit-usage.mp4"><img src="docs/media/usage-preview.gif" width="800" alt="html-doc-kit 사용 장면 미리보기: 에이전트에게 요청, 빌드, 보기, 고치기, 저장, 마크다운 문서"></a>
 
-<sub>눌러서 사용 설명 영상(2분 37초) 보기 · 설치 → 에이전트에게 요청 → 보기·고치기·저장 → 자동 복구</sub>
+<sub>미리보기는 소리 없이 저절로 돕니다 · 눌러서 내레이션이 있는 전체 영상(3분 4초) 보기<br>설치 → 에이전트에게 요청 → 보기·고치기·저장 → 자동 복구와 묻기 → 문서 형태·마크다운 → 자동 업데이트</sub>
 
 </div>
 
@@ -57,7 +57,20 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 
 ## 결과물은 이렇게 생겼습니다
 
-결과는 글꼴까지 든 HTML 한 파일입니다. 저장한 파일도 같은 기능을 가진 HTML 한 파일입니다.
+결과는 글꼴까지 든 HTML 한 파일입니다. 저장한 파일도 같은 기능을 가진 HTML 한 파일입니다. 아래는 키트 1.3.0으로 만든 파일을 Chrome으로 연 실제 화면입니다.
+
+**보고서(마크다운, `auto`)**: 길이 제한 없이 한 쪽으로 이어집니다. 알림 상자, 표 정렬, 할 일 목록 같은 GitHub 마크다운 문법이 그대로 모양을 갖춥니다. 본보기 원본: [`docs/samples/report.md`](docs/samples/report.md)
+
+<img src="docs/media/type-report.jpg" width="880" alt="마크다운으로 쓴 보고서를 연 화면: 알림 상자, 오른쪽 정렬된 숫자 표, 번호 목록">
+
+| 발표 장표(`slide`) | A4 문서(`a4`) |
+|---|---|
+| <img src="docs/media/type-slide.jpg" width="430" alt="16:9 발표 장표를 연 화면"> | <img src="docs/media/type-a4.jpg" width="430" alt="A4 보고서를 연 화면: 표와 막대 차트"> |
+| 1920×1080 쪽을 창에 맞춰 보여 줍니다. ← →로 넘기고 발표 메모(N)를 띄웁니다 | A4 크기로 고정된 쪽입니다. 인쇄·PDF도 같은 모양으로 나옵니다 |
+
+**고치는 중**: 글자를 누르면 그 자리에서 고칩니다(주황 테두리). 막대에 "저장 안 됨"이 뜨고, ⌘S·Ctrl+S로 저장합니다.
+
+<img src="docs/media/type-edit.jpg" width="880" alt="알림 상자 문장을 고치는 중인 화면">
 
 | 구분 | 기능 |
 |---|---|
