@@ -189,12 +189,27 @@ fs.writeFileSync(ef('pic.png'), Buffer.from(png.split(',')[1], 'base64'));
 fs.writeFileSync(ef('매출100%.png'), Buffer.from(png.split(',')[1], 'base64'));
 fs.mkdirSync(ef('d'), {recursive: true});
 
-// 15·51: --- 만으로는 장표가 되지 않는다
+// 15·51: --- 만으로는 장표가 되지 않는다. auto 문서의 --- 는 가로줄이고(1.3.0), 쪽은 <!-- page -->로 나눈다
 const para = '문단 내용입니다. '.repeat(30);
 fs.writeFileSync(ef('report.md'), `# 보고서\n\n${Array(25).fill(para).join('\n\n')}\n\n---\n\n# 둘째\n\n${Array(25).fill(para).join('\n\n')}\n`);
 const rep1 = run('build', ef('report.md'), '-o', ef('report.html'));
 const repHtml = fs.readFileSync(ef('report.html'), 'utf-8');
-ok('15·51 type 없는 --- 마크다운은 auto 두 쪽, 완성', rep1.status === 0 && (repHtml.match(/data-dk-size="auto"/g) || []).length === 2 && !repHtml.includes('data-dk-size="slide"'), rep1.stdout + rep1.stderr);
+ok('15·51 type 없는 --- 마크다운은 auto 한 쪽에 가로줄, 완성', rep1.status === 0 && (repHtml.match(/data-dk-size="auto"/g) || []).length === 1 && repHtml.includes('<hr>') && !repHtml.includes('data-dk-size="slide"'), rep1.stdout + rep1.stderr);
+fs.writeFileSync(ef('report2.md'), `# 보고서\n\n첫 쪽\n\n<!-- page -->\n\n# 둘째\n\n둘째 쪽\n`);
+run('build', ef('report2.md'), '-o', ef('report2.html'), '--no-browser');
+ok('15·51 auto 문서는 <!-- page -->로 쪽을 나눔', (fs.readFileSync(ef('report2.html'), 'utf-8').match(/data-dk-size="auto"/g) || []).length === 2);
+fs.writeFileSync(ef('a4two.md'), '---\ntype: a4\n---\n# 하나\n\n---\n\n# 둘\n');
+run('build', ef('a4two.md'), '-o', ef('a4two.html'), '--no-browser');
+ok('15·51 a4 문서는 --- 가 그대로 쪽 구분', (fs.readFileSync(ef('a4two.html'), 'utf-8').match(/data-dk-size="a4"/g) || []).length === 2);
+// 마크다운 읽기 좋게(1.3.0): GitHub 알림 상자와 각주를 글자가 아니라 모양으로 낸다
+fs.writeFileSync(ef('gfm.md'), '# 표본\n\n> [!NOTE]\n> 잠정치입니다.\n\n> [!WARNING]\n> 성수기와 겹칩니다.\n\n본문입니다.[^1]\n\n- [x] 끝남\n- [ ] 남음\n\n[^1]: 내부 설문 기준.\n');
+const gfm = run('build', ef('gfm.md'), '-o', ef('gfm.html'), '--no-browser');
+const gfmHtml = fs.readFileSync(ef('gfm.html'), 'utf-8');
+const gfmBody = gfmHtml.slice(gfmHtml.indexOf('<main'), gfmHtml.indexOf('</main>'));
+ok('1.3.0 알림 상자는 한국어 제목의 상자로', gfm.status === 0 && gfmBody.includes('markdown-alert-note') && gfmBody.includes('>참고</p>') && gfmBody.includes('markdown-alert-warning') && gfmBody.includes('>주의</p>') && !gfmBody.includes('[!NOTE]') && !gfmBody.includes('undefined'), gfmBody.slice(0, 600));
+ok('1.3.0 각주는 위 첨자와 각주 목록으로', gfmBody.includes('data-footnote-ref') && gfmBody.includes('class="footnotes"') && !gfmBody.includes('[^1]'), gfmBody.slice(-600));
+ok('1.3.0 할 일 목록 체크 상자', (gfmBody.match(/type="checkbox"/g) || []).length === 2);
+ok('1.3.0 그 파일이 check 통과', run('check', ef('gfm.html'), '--no-browser').status === 0);
 fs.writeFileSync(ef('deck.md'), '---\ntype: slide\n---\n# 장표\n\n---\n# 둘째\n');
 run('build', ef('deck.md'), '-o', ef('deck.html'));
 ok('15·51 type: slide를 적으면 장표', fs.readFileSync(ef('deck.html'), 'utf-8').includes('data-dk-size="slide"'));
@@ -354,7 +369,7 @@ const em2 = run('build', ef('m.md'), '-o', ef('m.md'));
 ok('47 build도 입력 .md에 쓰지 않음', em2.status === 2 && mdBefore.equals(fs.readFileSync(ef('m.md'))));
 
 // 5·28·32·48·22: extract·apply
-fs.writeFileSync(ef('two.md'), '---\ntitle: 옛제목\n---\n# 옛제목\n첫 쪽\n\n---\n# 둘\n둘째 쪽\n');
+fs.writeFileSync(ef('two.md'), '---\ntitle: 옛제목\n---\n# 옛제목\n첫 쪽\n\n<!-- page -->\n# 둘\n둘째 쪽\n');
 run('build', ef('two.md'), '-o', ef('two.html'));
 const twoBefore = fs.readFileSync(ef('two.html'));
 const self = run('extract', ef('two.html'), '-o', ef('two.html'));

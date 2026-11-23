@@ -1,20 +1,66 @@
-/* 기본 모양. 문서에 자체 스타일이 없거나 마크다운으로 쓴 문서에 쓴다(덧붙인 스타일이 이긴다) */
-:where(#dk-document[data-dk-plain] .dk-page-inner){font:16px/1.7 DocKitFull,'Noto Sans KR','Noto Sans CJK KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1d2b38;padding:56px 64px;word-break:keep-all;overflow-wrap:anywhere}
+/* 기본 모양. 문서에 자체 스타일이 없거나 마크다운으로 쓴 문서에 쓴다(덧붙인 스타일이 이긴다).
+   참고: GitHub 마크다운(github-markdown-css), Tailwind prose, 한국어 조판(W3C klreq: 낱말 단위 줄바꿈, 넉넉한 줄 간격) */
+:where(#dk-document[data-dk-plain] .dk-page-inner){font:16px/1.75 DocKitFull,'Noto Sans KR','Noto Sans CJK KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1f2b37;padding:56px 64px;word-break:keep-all;overflow-wrap:break-word}
 :where(#dk-document[data-dk-plain] .dk-page[data-dk-size=slide] .dk-page-inner){font-size:28px;padding:72px 96px}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1){font-size:1.9em;line-height:1.3;margin:0 0 .8em;color:#123451}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h2){font-size:1.35em;line-height:1.35;margin:1.6em 0 .6em;padding-bottom:.3em;border-bottom:2px solid #d6e1eb;color:#1b5790}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h3){font-size:1.12em;line-height:1.4;margin:1.3em 0 .5em;color:#1b5790}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1,h2,h3):first-child{margin-top:0}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(p){margin:0 0 .9em}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(ul,ol){margin:0 0 1em;padding-left:1.5em}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li+li){margin-top:.3em}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(strong,b){color:#0f2a44}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(table){border-collapse:collapse;width:100%;margin:0 0 1.2em;font-size:.94em;line-height:1.6}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th,td){border:1px solid #c9d5e0;padding:.55em .75em;vertical-align:top}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th){background:#123451;color:#fff;text-align:left;font-weight:700;border-color:#123451}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(tbody tr:nth-child(even) td){background:#f5f8fb}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(*:first-child){margin-top:0}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(*:last-child){margin-bottom:0}
+/* 제목: 크기 차이로 단계를 보이고, 장 제목(h2) 아래에 선을 긋는다 */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1,h2,h3,h4,h5,h6){color:#102a43;font-weight:700;line-height:1.35;text-wrap:balance;break-after:avoid}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h1){font-size:2em;line-height:1.3;margin:0 0 .9em;letter-spacing:-.01em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h2){font-size:1.45em;margin:2em 0 .75em;padding-bottom:.35em;border-bottom:1px solid #d5dee8}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h3){font-size:1.2em;margin:1.7em 0 .6em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h4){font-size:1.05em;margin:1.5em 0 .5em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(h5,h6){font-size:.95em;margin:1.4em 0 .4em;color:#3e5266}
+/* 본문 */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(p){margin:0 0 1.1em;text-wrap:pretty}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(a){color:#0b5cad;text-decoration:underline;text-decoration-thickness:1px;text-underline-offset:.2em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(strong,b){font-weight:700;color:#102a43}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(del,s){color:#6b7b8c}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(mark){background:#fff1a8;color:inherit;padding:0 .15em;border-radius:2px}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(sup,sub){font-size:.75em;line-height:0}
+/* 목록: 항목 사이를 조금 띄우고 글머리는 옅게 */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(ul,ol){margin:0 0 1.1em;padding-left:1.6em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li){margin:.35em 0}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li>p){margin:.35em 0}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li>ul,li>ol){margin:.35em 0 .2em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li)::marker{color:#7a8ea3}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(ol>li)::marker{font-weight:700;color:#4a6178}
+/* 할 일 목록: 글머리 점 대신 체크 상자만 */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li:has(>input[type=checkbox])){list-style:none;margin-left:-1.3em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(li>input[type=checkbox]){margin:0 .5em .15em 0;vertical-align:middle;accent-color:#1b6fb5}
+/* 표: 옅은 머리, 줄무늬, 숫자는 같은 폭 */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(table){border-collapse:collapse;width:100%;margin:0 0 1.4em;font-size:.94em;line-height:1.6;font-variant-numeric:tabular-nums;break-inside:auto}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th,td){border:1px solid #d5dee8;padding:.6em .8em;vertical-align:top}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th){background:#edf2f7;color:#102a43;font-weight:700;text-align:left;border-bottom:2px solid #9fb3c8}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th[align=right],td[align=right]){text-align:right}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(th[align=center],td[align=center]){text-align:center}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(tbody tr:nth-child(even) td){background:#f7f9fc}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(tr){break-inside:avoid}
+/* 인용: 옅은 선과 흐린 글자. 알림 상자와 구별한다 */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(blockquote){margin:0 0 1.1em;padding:.1em 1.1em;border-left:4px solid #cfd9e3;color:#46596c}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(blockquote p){margin:.5em 0}
+/* 알림 상자(> [!NOTE] 등) */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert){--dk-a:#0969da;margin:0 0 1.1em;padding:.7em 1.1em;border-left:4px solid var(--dk-a);border-radius:0 6px 6px 0;background:color-mix(in srgb,var(--dk-a) 7%,#fff);break-inside:avoid}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert p){margin:.3em 0}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-title){display:flex;align-items:center;gap:.45em;font-weight:700;color:var(--dk-a)}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-title svg){fill:currentColor;width:1em;height:1em;flex:none}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-tip){--dk-a:#1a7f37}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-important){--dk-a:#8250df}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-warning){--dk-a:#9a6700}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-caution){--dk-a:#cf222e}
+/* 코드: 한글은 고정폭 글꼴에 없어 본문 글꼴로 이어 쓴다(글자 사이가 벌어지지 않게) */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(code,kbd,pre){font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,DocKitFull,'Noto Sans KR',monospace}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(code){font-size:.875em;background:#eef2f6;padding:.15em .4em;border-radius:4px}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre){margin:0 0 1.2em;padding:1em 1.2em;background:#f6f8fa;border:1px solid #e1e7ee;border-radius:6px;font-size:.875em;line-height:1.6;overflow:auto;word-break:normal;overflow-wrap:normal;break-inside:avoid}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre code){background:none;padding:0;font-size:inherit;border-radius:0}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(kbd){font-size:.85em;padding:.1em .4em;border:1px solid #c5d0db;border-bottom-width:2px;border-radius:4px;background:#f8fafc}
+/* 그 밖 */
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(img,svg){max-width:100%;height:auto}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(blockquote){margin:0 0 1em;padding:.6em 1em;border-left:4px solid #1887ae;background:#eef5fa}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(hr){border:0;border-top:1px solid #d6e1eb;margin:1.6em 0}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(code){font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em;background:#eef2f6;padding:.1em .3em;border-radius:3px}
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre){background:#eef2f6;padding:1em;overflow:auto;word-break:normal}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(hr){border:0;height:1px;background:#d5dee8;margin:2.2em 0}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(dl){margin:0 0 1.1em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(dt){font-weight:700;margin-top:.6em}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(dd){margin:0 0 .4em 1.4em}
+/* 각주 */
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.footnotes){margin-top:2.4em;padding-top:.8em;border-top:1px solid #d5dee8;font-size:.88em;color:#46596c}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(.footnotes h2){font-size:1em;border:0;margin:0 0 .4em;padding:0;color:#46596c}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(sup a,a[data-footnote-backref]){text-decoration:none}

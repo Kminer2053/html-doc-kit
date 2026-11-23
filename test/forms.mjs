@@ -35,7 +35,7 @@ const auto = setInterval(async () => {
 }, 50);
 
 // auto: 긴 문서
-const f1 = build('auto', `# 긴 문서\n\n${long}\n\n---\n\n# 둘째 쪽\n둘째`, '--type', 'auto');
+const f1 = build('auto', `# 긴 문서\n\n${long}\n\n<!-- page -->\n\n# 둘째 쪽\n둘째`, '--type', 'auto');
 await b.nav(f1);
 await sleep(300);
 const st = await b.ev(`(()=>{const p=document.querySelector('.dk-page.dk-active');const v=document.querySelector('#dk-viewport');const s=getComputedStyle(p);return {zoom:parseFloat(s.getPropertyValue('--dk-scale')),h:p.getBoundingClientRect().height,vh:v.clientHeight,sh:v.scrollHeight,w:p.getBoundingClientRect().width,vw:v.clientWidth}})()`);

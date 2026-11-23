@@ -8,7 +8,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ![Node 22+](https://img.shields.io/badge/Node-22%2B-339933?logo=nodedotjs&logoColor=white)
 ![에이전트](https://img.shields.io/badge/에이전트-Claude%20Code·Codex·Cursor-5E35B1)
 ![출력](https://img.shields.io/badge/출력-HTML%20한%20파일-267A68)
-![키트](https://img.shields.io/badge/키트-1.2.2-2563EB)
+![키트](https://img.shields.io/badge/키트-1.3.0-2563EB)
 ![확인](https://img.shields.io/badge/확인-macOS·Windows-6B7280)
 [![License: MIT](https://img.shields.io/badge/License-MIT-EAB308)](LICENSE)
 
@@ -296,6 +296,8 @@ npm test        # 전체 시험(수십 분)
 사내 발표 장표를 편집용으로 만들며 생긴 뷰어·편집기에서 출발해 분리한 스킬입니다. 기여는 언제든 환영합니다. 이슈나 PR을 열어 주세요.
 
 [MIT License](LICENSE)로 배포합니다. 내장 글꼴(Noto Sans CJK KR 부분 집합)은 SIL Open Font License 1.1을 따르며 전문은 [`skill/html-doc-kit/assets/OFL.txt`](skill/html-doc-kit/assets/OFL.txt)에 있습니다.
+
+실행 파일에는 [parse5](https://github.com/inikulin/parse5), [marked](https://github.com/markedjs/marked), [marked-alert](https://github.com/bent10/marked-extensions), [marked-footnote](https://github.com/bent10/marked-extensions)(모두 MIT)가 묶여 들어갑니다. 마크다운 기본 모양은 [github-markdown-css](https://github.com/sindresorhus/github-markdown-css)와 [Tailwind Typography](https://github.com/tailwindlabs/tailwindcss-typography)의 간격·표 처리, W3C [한국어 조판 요구사항](https://www.w3.org/International/klreq/)을 참고했습니다(코드는 가져오지 않음).
 
 ---
 

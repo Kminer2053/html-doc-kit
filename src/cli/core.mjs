@@ -3,6 +3,8 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import {marked} from 'marked';
+import markedAlert from 'marked-alert';
+import markedFootnote from 'marked-footnote';
 import {addClass, attr, bodyOf, byId, classes, delAttr, find, findAll, findOuter, hasAttr, headOf, htmlOf, inner, isEl, isScriptAnimation, isScriptAttr, parse, readHtml, remove, serialize, setAttr, textOf, walk} from './html.mjs';
 import {fixViewportUnits, scopeCss} from './css.mjs';
 import {BASE_CSS, FONT_CSS, KIT_CSS, KIT_JS, VERSION} from './assets.gen.mjs';
@@ -39,6 +41,19 @@ marked.use({
     },
   }],
 });
+// GitHub 문법의 알림 상자(> [!NOTE] 등)와 각주([^1]). 에이전트가 흔히 쓰는데 그대로 두면 글자로 남는다. 제목은 한국어로 바꾸고, 아이콘 대신 색 있는 제목만 둔다(변형을 바꾸면 기본 아이콘이 함께 빠진다)
+marked.use(
+  markedAlert({
+    variants: [
+      {type: 'note', title: '참고', icon: ''},
+      {type: 'tip', title: '도움말', icon: ''},
+      {type: 'important', title: '중요', icon: ''},
+      {type: 'warning', title: '주의', icon: ''},
+      {type: 'caution', title: '경고', icon: ''},
+    ],
+  }),
+);
+marked.use(markedFootnote({description: '각주', refMarkers: false}));
 // SVG 안의 <style>(차트 글자 모양 등)은 문서 전체 모양이 아니다. 문서 스타일로 옮기지 않고 그 자리에서 범위만 씌운다.
 // 그래야 이것만 있는 문서가 기본 모양을 쓰고, 본문을 꺼내 고쳐 되돌려도 어느 스타일이 SVG 몫인지 잃지 않는다
 const inSvg = (n) => {
@@ -283,9 +298,11 @@ export function pagesFromMarkdown(source, baseDir, opts, warn) {
     });
     text = text.slice(fm[0].length);
   }
-  const chunks = text.split(/^\s*(?:---|<!--\s*page\s*-->)\s*$/m).map((c) => c.trim()).filter(Boolean);
-  // --- 는 수평선으로도 흔히 쓴다. 장표는 type: slide나 --type slide로만 정한다
+  // --- 는 수평선으로도 흔히 쓴다. 장표는 type: slide나 --type slide로만 정한다.
+  // 쪽이 정해진 형태(slide, a4)에서만 --- 를 쪽 구분으로 읽는다. auto 문서에서는 가로줄이고, 쪽을 나누려면 <!-- page -->를 쓴다
   const kind = opts.type || meta.type || 'auto';
+  const splitter = kind === 'auto' ? /^\s*<!--\s*page\s*-->\s*$/m : /^\s*(?:---|<!--\s*page\s*-->)\s*$/m;
+  const chunks = text.split(splitter).map((c) => c.trim()).filter(Boolean);
   const parts = [];
   let cssAll = '';
   for (const chunk of chunks.length ? chunks : ['']) {
