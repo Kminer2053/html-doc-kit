@@ -5,3 +5,4 @@ node_modules/
 src/cli/assets.gen.mjs
 test/out/
 dist/
+internal/

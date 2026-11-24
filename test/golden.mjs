@@ -1,4 +1,4 @@
-// A1: 원래 15쪽 장표를 키트로 만들어 15쪽 모두 원본과 픽셀 비교한다. 원본 저장소가 있을 때만 돈다
+// A1: 원래 15쪽 장표를 키트로 만들어 모든 쪽을 원본과 픽셀 비교한다. 원본(DOC_KIT_GOLDEN_DECK 또는 internal/golden-deck.html)이 있을 때만 돈다
 import {execFileSync} from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +9,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const out = path.join(here, 'out', 'golden');
 fs.mkdirSync(out, {recursive: true});
 const CLI = path.join(here, '../skill/html-doc-kit/scripts/doc-kit.mjs');
-const ORIG = process.env.DOC_KIT_GOLDEN_DECK || 'internal/golden-deck.html';
+const ORIG = process.env.DOC_KIT_GOLDEN_DECK || path.join(here, '..', 'internal', 'golden-deck.html');
 if (!fs.existsSync(ORIG)) {
   console.log('SKIP 원본 장표 없음');
   process.exit(0);

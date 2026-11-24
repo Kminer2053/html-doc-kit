@@ -23,7 +23,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ---
 
 > [!IMPORTANT]
-> **확인 범위(2026-11-08, 1단계 완료):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. Windows 10(PowerShell 5.1·Git Bash)에서 설치·명령·훅과 Claude Code·Codex·Cursor CLI 실행을 확인했습니다(2026-11-08, 키트 없이 직접 쓴 HTML도 훅이 고침). Windows의 Chrome·Edge에서도 열기·고치기·저장을 자동으로 확인했고, Chrome에서는 사람이 진짜 저장 창으로 같은 파일 덮어쓰기와 그림 끌기까지 확인했습니다. Cursor 앱으로 만든 보고서도 통과했습니다([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
+> **확인 범위(2026-11-08):** macOS에서 Claude Code·Codex는 낮은 등급 모델로 11개 요청 모두 뷰어·편집기가 든 파일이 나왔고, Cursor는 앱에서 훅이 도는 것을 확인했습니다. 만든 파일은 Chrome·Safari에서 보이기·고치기·저장을 확인했습니다. Windows 10(PowerShell 5.1·Git Bash)에서 설치·명령·훅과 Claude Code·Codex·Cursor CLI 실행을 확인했습니다(2026-11-08, 키트 없이 직접 쓴 HTML도 훅이 고침). Windows의 Chrome·Edge에서도 열기·고치기·저장을 자동으로 확인했고, Chrome에서는 사람이 진짜 저장 창으로 같은 파일 덮어쓰기와 그림 끌기까지 확인했습니다. Cursor 앱으로 만든 보고서도 통과했습니다([Windows 시험 안내](docs/WINDOWS_TEST.md)). 자세한 실측은 [실측 표](test/probe/RESULTS.md)에 있습니다.
 
 ## 이런 분께 좋습니다
 
@@ -217,7 +217,7 @@ node skill/html-doc-kit/scripts/doc-kit.mjs check 결과.html   # -> 종료 코�
 - **Cursor CLI `-p`(print) 실행** — 끝날 때 결과를 화면에 보여 주지 못하고 `~/.doc-kit/hook.log`에만 남깁니다. 예전에 설치했으면 `install`을 다시 실행하세요.
 - **Cursor CLI 전역 지침** — 작업 폴더가 홈 밖(`/tmp`, 외장 디스크 등)이면 전역 지침이 빠집니다. 스킬과 훅은 그대로 돕니다.
 - **모델이 파일을 쓰지 않을 때** — 되묻기만 하거나 대화창에 HTML을 출력하면 고칠 파일이 없어 키트가 들어가지 않습니다.
-- **다른 포맷 변환** — PDF·HWPX·DOCX·PPTX를 고칠 수 있는 HTML로 바꾸는 기능은 아직 없습니다(2단계 이후).
+- **다른 포맷 변환** — PDF·HWPX·DOCX·PPTX를 고칠 수 있는 HTML로 바꾸는 기능은 지원하지 않습니다.
 
 자세한 한계는 [`docs/HOOKS.md`](docs/HOOKS.md#남는-한계)에 있습니다.
 
@@ -246,7 +246,7 @@ node skill/html-doc-kit/scripts/doc-kit.mjs check 결과.html   # -> 종료 코�
 
 **Windows에서도 되나요?** 됩니다. Windows 10에서 설치, 명령, 훅(Git Bash·PowerShell·cmd), Claude Code·Codex·Cursor CLI 실행을 확인했습니다. 훅은 Node 22 이상이 시스템 PATH에 있으면 어느 셸에서나 돌고, 없으면 `doctor`가 알려 줍니다. Codex 앱만 깔아 `codex` 명령이 없으면 훅 승인은 앱 안의 `codex.exe`에 `--no-daemon`을 붙여 실행해 합니다(`doctor`가 경로를 알려 줌). Chrome에서 진짜 저장 창으로 덮어쓰기와 그림 끌기를 확인했고, Cursor 앱으로 만든 보고서도 통과했습니다. Chrome은 `AppData` 아래(임시 폴더 포함)에는 저장을 막으니, 고칠 문서는 문서 폴더 같은 곳에 두세요. [Windows 시험 안내](docs/WINDOWS_TEST.md)로 직접 시험할 수 있습니다.
 
-**글자가 없는 스캔 PDF도 바꿔 주나요?** 아닙니다. 다른 포맷 변환은 2단계 과제이며, 글자가 없는 스캔 PDF는 처리하지 않습니다.
+**PDF·한글 파일도 바꿔 주나요?** 아닙니다. 지금은 다른 포맷을 HTML로 바꾸는 기능을 지원하지 않습니다.
 
 ---
 
@@ -263,15 +263,13 @@ html-doc-kit/
 │   ├── kit/                   # 뷰어·편집기 코드와 글꼴, 버전별 해시
 │   └── cli/                   # 명령·설치·훅
 ├── test/                      # 회귀·편집기·복구 시험, 에이전트 실측
-├── reference/                 # 원래 장표에서 옮겨 온 회귀 목록과 원본 시험
+├── reference/                 # 원래 장표 검증에서 옮겨 온 회귀 목록
 ├── tools/                     # 번들러, 글꼴 생성, 릴리스 가드
 ├── docs/
 │   ├── HOOKS.md               # 훅이 건드리는 파일과 남는 한계
 │   ├── WINDOWS_TEST.md        # Windows 시험 안내
 │   └── media/                 # 사용 설명 영상과 표지
-├── LICENSE                    # MIT
-├── PRD.md                     # 요구사항
-└── PLAN.md                    # 작업계획과 진행 현황
+└── LICENSE                    # MIT
 ```
 
 ---
@@ -294,8 +292,6 @@ npm test        # 전체 시험(수십 분)
 
 | 문서 | 내용 |
 |---|---|
-| **[PRD.md](PRD.md)** | 요구사항, 확정된 결정, 단계별 목표 |
-| **[PLAN.md](PLAN.md)** | 작업계획과 진행 현황 |
 | **[docs/HOOKS.md](docs/HOOKS.md)** | 훅이 건드리는 파일과 남는 한계 |
 | **[docs/WINDOWS_TEST.md](docs/WINDOWS_TEST.md)** | Windows 시험 안내(에이전트에 붙여 넣을 프롬프트) |
 | **[test/REGRESSION_STATUS.md](test/REGRESSION_STATUS.md)** | 회귀 목록 이행 현황 |
@@ -318,6 +314,6 @@ npm test        # 전체 시험(수십 분)
 
 **본문만 쓰세요. 뷰어와 편집기는 키트가 넣습니다.**
 
-[처음부터 시작하기](#5분-시작) · [요구사항](PRD.md) · [피드백 남기기](https://github.com/Kminer2053/html-doc-kit/issues)
+[처음부터 시작하기](#5분-시작) · [피드백 남기기](https://github.com/Kminer2053/html-doc-kit/issues)
 
 </div>
