@@ -34,5 +34,12 @@
   "style": "3e44d70af071967beb7bb8a0e2d667ea",
   "base": "79d9169eea56eeb6e6680f5dea164f2a",
   "font": "3246a760debddd5b214f0bcae6a8edfc"
+ },
+ "1.4.0": {
+  "code": "3f5034337168f3bcb432953969c6d7c8",
+  "style": "82d36b0622d3b098808b3cf0addd9b4e",
+  "base": "cd6402a6bc4124e1a213cc73ede27870",
+  "font": "3246a760debddd5b214f0bcae6a8edfc",
+  "fontLite": "d298904f68d86a3eb32e606325107956"
  }
 }

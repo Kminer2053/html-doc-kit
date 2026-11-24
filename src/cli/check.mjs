@@ -66,7 +66,8 @@ export function inspect(source) {
   for (const [k, id] of Object.entries(parts)) {
     const t = textIn(byId(tree, id));
     if (t === null || (future && !t.trim())) errors.push(`C2 키트 부품이 없습니다: ${id}`);
-    else if (hashes && sha(t) !== hashes[k]) errors.push(`C2 키트 코드가 바뀌었습니다: ${id}`);
+    // 글꼴 부품은 한글 전체를 실은 판과 싣지 않은 가벼운 판(1.4.0부터) 둘 중 하나다
+    else if (hashes && sha(t) !== hashes[k] && !(k === 'font' && hashes.fontLite && sha(t) === hashes.fontLite)) errors.push(`C2 키트 코드가 바뀌었습니다: ${id}`);
   }
   if (!byId(tree, 'dk-book') || !byId(tree, 'dk-base') || !byId(tree, 'dk-document') || !byId(tree, 'dk-viewport')) errors.push('C3 필수 요소가 없습니다');
   // 부품이 겹치면 해시가 맞아도 뒤의 부품이 앞의 것을 덮어쓴다

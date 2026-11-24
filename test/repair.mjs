@@ -213,6 +213,31 @@ ok('1.3.0 그 파일이 check 통과', run('check', ef('gfm.html'), '--no-browse
 fs.writeFileSync(ef('deck.md'), '---\ntype: slide\n---\n# 장표\n\n---\n# 둘째\n');
 run('build', ef('deck.md'), '-o', ef('deck.html'));
 ok('15·51 type: slide를 적으면 장표', fs.readFileSync(ef('deck.html'), 'utf-8').includes('data-dk-size="slide"'));
+// 가벼운 형태(1.4.0): 마크다운 auto 문서는 글꼴을 싣지 않는다. 쪽이 정해진 문서와 HTML 입력은 한글 전체를 싣는다
+const size = (f) => fs.statSync(f).size;
+const lite = (f) => has(f, '<meta name="doc-font" content="system">');
+ok('1.4.0 마크다운 auto 문서는 글꼴 없이 200KB 아래', size(ef('gfm.html')) < 200e3 && lite(ef('gfm.html')), String(size(ef('gfm.html'))));
+ok('1.4.0 마크다운 장표는 글꼴을 실음', size(ef('deck.html')) > 1e6 && !lite(ef('deck.html')), String(size(ef('deck.html'))));
+fs.writeFileSync(ef('fullmd.md'), '---\nfont: full\n---\n# 글꼴 실음\n\n본문\n');
+run('build', ef('fullmd.md'), '-o', ef('fullmd.html'), '--no-browser');
+ok('1.4.0 앞머리 font: full이면 마크다운도 글꼴을 실음', size(ef('fullmd.html')) > 1e6 && run('check', ef('fullmd.html'), '--no-browser').status === 0);
+run('build', ef('deck.md'), '-o', ef('deck_lite.html'), '--font', 'system', '--no-browser');
+ok('1.4.0 --font system이면 장표도 가벼운 형태', size(ef('deck_lite.html')) < 200e3 && lite(ef('deck_lite.html')) && run('check', ef('deck_lite.html'), '--no-browser').status === 0);
+fs.writeFileSync(ef('htmlin.html'), plain('', `<h1>${WORD}</h1>`));
+run('build', ef('htmlin.html'), '-o', ef('htmlin_out.html'), '--no-browser');
+ok('1.4.0 HTML 입력은 그대로 글꼴을 실음', size(ef('htmlin_out.html')) > 1e6 && !lite(ef('htmlin_out.html')));
+const liteBody = path.join(EDGE, 'gfm.body.html');
+run('extract', ef('gfm.html'), '-o', liteBody);
+ok('1.4.0 extract가 가벼운 형태 표식을 남김', fs.readFileSync(liteBody, 'utf-8').includes('<meta name="doc-font" content="system">'));
+fs.writeFileSync(liteBody, fs.readFileSync(liteBody, 'utf-8').replace('본문입니다.', '본문을 고쳤습니다.'));
+const la = run('apply', liteBody, ef('gfm.html'), '--no-browser');
+ok('1.4.0 apply 뒤에도 가벼운 형태', la.status === 0 && lite(ef('gfm.html')) && size(ef('gfm.html')) < 200e3 && has(ef('gfm.html'), '본문을 고쳤습니다.'), la.stdout + la.stderr);
+fs.writeFileSync(liteBody, fs.readFileSync(liteBody, 'utf-8').replace('<meta name="doc-font" content="system">', '').replace('본문을 고쳤습니다.', '표식 없이 고쳤습니다.'));
+run('apply', liteBody, ef('gfm.html'), '--no-browser');
+ok('1.4.0 표식 없는 본문을 apply해도 원래 형태를 이음', lite(ef('gfm.html')) && has(ef('gfm.html'), '표식 없이 고쳤습니다.') && run('check', ef('gfm.html'), '--no-browser').status === 0);
+const forged = fs.readFileSync(ef('gfm.html'), 'utf-8').replace(/(<style id="dk-font-style">)[^<]*/, '$1/* 다른 글자 */');
+fs.writeFileSync(ef('gfm_forged.html'), forged);
+ok('1.4.0 글꼴 부품을 바꾸면 check 실패', run('check', ef('gfm_forged.html'), '--no-browser').status === 1);
 
 // 16·49: 이상한 경로 하나로 문서 전체가 실패하지 않는다
 const oddRefs = {

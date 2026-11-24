@@ -8,7 +8,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 ![Node 22+](https://img.shields.io/badge/Node-22%2B-339933?logo=nodedotjs&logoColor=white)
 ![에이전트](https://img.shields.io/badge/에이전트-Claude%20Code·Codex·Cursor-5E35B1)
 ![출력](https://img.shields.io/badge/출력-HTML%20한%20파일-267A68)
-![키트](https://img.shields.io/badge/키트-1.3.0-2563EB)
+![키트](https://img.shields.io/badge/키트-1.4.0-2563EB)
 ![확인](https://img.shields.io/badge/확인-macOS·Windows-6B7280)
 [![License: MIT](https://img.shields.io/badge/License-MIT-EAB308)](LICENSE)
 
@@ -57,7 +57,7 @@ _코딩 에이전트에게 **"이 내용 HTML로 만들어줘"** 한마디면 �
 
 ## 결과물은 이렇게 생겼습니다
 
-결과는 글꼴까지 든 HTML 한 파일입니다. 저장한 파일도 같은 기능을 가진 HTML 한 파일입니다. 아래는 키트 1.3.0으로 만든 파일을 Chrome으로 연 실제 화면입니다.
+결과는 HTML 한 파일이고, 저장한 파일도 같은 기능을 가진 HTML 한 파일입니다. 마크다운 보고서는 PC의 한글 글꼴로 보여 약 70KB이고, 장표·A4는 어느 PC에서나 같은 줄바꿈이 되도록 한글 글꼴을 실어 약 2MB입니다. 아래는 키트 1.3.0으로 만든 파일을 Chrome으로 연 실제 화면입니다.
 
 **보고서(마크다운, `auto`)**: 길이 제한 없이 한 쪽으로 이어집니다. 알림 상자, 표 정렬, 할 일 목록 같은 GitHub 마크다운 문법이 그대로 모양을 갖춥니다. 본보기 원본: [`docs/samples/report.md`](docs/samples/report.md)
 
@@ -172,7 +172,7 @@ node skill/html-doc-kit/scripts/doc-kit.mjs install --agents cursor
 `doc-kit`은 `node skill/html-doc-kit/scripts/doc-kit.mjs`입니다(설치 뒤에는 `~/.doc-kit/bin/doc-kit.mjs`).
 
 ```text
-build <본문.md|본문.html> -o <결과.html> [--type slide|a4|a4-landscape|auto] [--title 제목]
+build <본문.md|본문.html> -o <결과.html> [--type slide|a4|a4-landscape|auto] [--title 제목] [--font system|full]
 ensure <파일.html> [-o 결과.html]    어떤 HTML이든 완성 파일로 만듭니다(이미 완성이면 그대로). 마크다운은 같은 이름의 .html로 냅니다
 check <파일.html>                    완성 여부 판정. 0 완성, 1 미완성, 2 입력 문제
 extract <파일.html> [-o 본문.html]   완성 파일에서 본문만 꺼냅니다(기본 위치 .doc-kit/)
@@ -241,6 +241,8 @@ node skill/html-doc-kit/scripts/doc-kit.mjs check 결과.html   # -> 종료 코�
 **모델이 스킬을 안 쓰고 HTML을 직접 쓰면요?** 문서 요청이었으면 작업이 끝날 때 훅이 키트를 넣습니다. 문서인지 애매하면 넣을지 묻습니다. 끝난 뒤 `check`가 0이면 완성입니다.
 
 **HTML이면 무조건 들어가나요?** 아닙니다. 게임·계산기 같은 단독 실행 프로그램이나 웹앱에는 넣지 않고, 애매하면 먼저 묻습니다.
+
+**파일 크기는 얼마나 되나요?** 마크다운으로 쓴 보고서(`auto`)는 약 70KB입니다. 글꼴을 싣지 않고 PC의 한글 글꼴(맥은 Apple SD 산돌고딕 Neo, Windows는 맑은 고딕)로 보입니다. 장표·A4와 HTML로 만든 문서는 받는 PC와 상관없이 같은 모양·줄바꿈이 되도록 한글 글꼴 전체를 실어 약 2MB입니다. 마크다운 앞머리에 `font: full`(글꼴 싣기)이나 `font: system`(가볍게)을 적어 바꿀 수 있습니다.
 
 **새 버전은 어떻게 받나요?** 설치한 키트가 쓸 때마다(한 시간에 한 번) 확인해 스스로 업데이트합니다. 끄려면 `DOC_KIT_NO_UPDATE=1`입니다.
 

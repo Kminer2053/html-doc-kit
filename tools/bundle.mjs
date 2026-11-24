@@ -16,11 +16,13 @@ const BASE_CSS = read('src/kit/base.css');
 const FONT_CSS =
   '/* Noto Sans KR, SIL Open Font License 1.1 (scripts.sil.org/OFL) */' +
   [400, 700].map((w) => `@font-face{font-family:DocKitFull;src:url(data:font/woff2;base64,${b64(`src/kit/fonts/full-${w}.woff2`)}) format("woff2");font-weight:${w};font-display:block}`).join('');
+// 가벼운 형태(마크다운 auto 문서): 글꼴을 싣지 않고 PC의 한글 글꼴을 쓴다. 부품 자리는 남겨 check가 해시로 판정한다
+const FONT_LITE_CSS = '/* html-doc-kit: 글꼴을 싣지 않은 가벼운 형태. PC의 한글 글꼴로 보입니다 */';
 if (KIT_JS.includes('</script') || /<\/style/.test(KIT_CSS + BASE_CSS)) throw new Error('키트 코드에 닫는 태그 글자가 있으면 안 됩니다');
 const sha = (s) => crypto.createHash('sha256').update(s.replace(/\r\n?/g, '\n')).digest('hex').slice(0, 32);
 const vf = path.join(root, 'src/kit/versions.json');
 const versions = fs.existsSync(vf) ? JSON.parse(fs.readFileSync(vf, 'utf-8')) : {};
-const now = {code: sha(KIT_JS), style: sha(KIT_CSS), base: sha(BASE_CSS), font: sha(FONT_CSS)};
+const now = {code: sha(KIT_JS), style: sha(KIT_CSS), base: sha(BASE_CSS), font: sha(FONT_CSS), fontLite: sha(FONT_LITE_CSS)};
 // 배포 전(태그 없음)에는 같은 버전의 해시를 새로 덮어쓴다. 태그 뒤로는 버전을 올려야 한다
 try {
   guardRelease(root, version, now);
@@ -32,7 +34,7 @@ versions[version] = now;
 fs.writeFileSync(vf, JSON.stringify(versions, null, 1) + '\n');
 fs.writeFileSync(
   path.join(root, 'src/cli/assets.gen.mjs'),
-  `export const VERSION=${JSON.stringify(version)};\nexport const KIT_JS=${JSON.stringify(KIT_JS)};\nexport const KIT_CSS=${JSON.stringify(KIT_CSS)};\nexport const BASE_CSS=${JSON.stringify(BASE_CSS)};\nexport const FONT_CSS=${JSON.stringify(FONT_CSS)};\nexport const HASHES=${JSON.stringify(versions)};\n`,
+  `export const VERSION=${JSON.stringify(version)};\nexport const KIT_JS=${JSON.stringify(KIT_JS)};\nexport const KIT_CSS=${JSON.stringify(KIT_CSS)};\nexport const BASE_CSS=${JSON.stringify(BASE_CSS)};\nexport const FONT_CSS=${JSON.stringify(FONT_CSS)};\nexport const FONT_LITE_CSS=${JSON.stringify(FONT_LITE_CSS)};\nexport const HASHES=${JSON.stringify(versions)};\n`,
 );
 await build({
   entryPoints: [path.join(root, 'src/cli/main.mjs')],

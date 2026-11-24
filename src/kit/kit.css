@@ -20,7 +20,7 @@ body.dk-js #dk-viewport{flex:1;min-width:0;overflow:auto}
 body.dk-js #dk-document{min-height:100%;display:flex;flex-direction:column;align-items:center;justify-content:flex-start}
 body.dk-js:not(.dk-reading) #dk-document{justify-content:center}
 .dk-ui,.dk-ui *{box-sizing:border-box}
-.dk-ui{font:13px/1.3 DocKitFull,sans-serif;color:#ecf4ff;letter-spacing:normal;text-align:left}
+.dk-ui{font:13px/1.3 DocKitFull,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',sans-serif;color:#ecf4ff;letter-spacing:normal;text-align:left}
 .dk-ui[hidden]{display:none!important}
 .dk-ui button,.dk-ui select{font:inherit;background:#29485f;color:inherit;border:1px solid #607588;padding:6px 10px;border-radius:4px;cursor:pointer}
 .dk-ui button:hover,.dk-ui button:focus-visible{background:#3d647e;outline:2px solid #80d9e1;outline-offset:1px}

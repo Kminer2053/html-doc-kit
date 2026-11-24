@@ -251,6 +251,8 @@ export async function apply(bodyFile, file, opts = {}) {
     src.kit = {...old.kit, base: ''};
     oldCount = old.pages.length;
     if (!src.docTitle) src.docTitle = old.docTitle;
+    // 본문 파일에 글꼴 표식이 없으면 원래 파일의 형태(가벼운 형태 등)를 잇는다
+    if (!src.font && old.font) src.font = old.font;
     // 문서 제목이 첫 쪽 제목에서 온 경우에는 첫 쪽 제목을 고치면 함께 바뀐다
     const before = old.pages[0] ? pageTitleOf(old.pages[0]) : '';
     const after = src.pages[0] ? pageTitleOf(src.pages[0]) : '';

@@ -17,7 +17,8 @@ Notes:
 # 둘째 쪽
 ```
 
-- 맨 앞 `---` 사이: `title`, `type`(`slide`, `a4`, `a4-landscape`, `auto`). 없어도 됩니다.
+- 맨 앞 `---` 사이: `title`, `type`(`slide`, `a4`, `a4-landscape`, `auto`), `font`(`system`, `full`). 없어도 됩니다.
+- 글꼴: `auto` 문서는 글꼴을 싣지 않고 PC의 한글 글꼴로 보입니다(약 70KB). 장표·A4는 어느 PC에서나 같은 줄바꿈이 되도록 한글 글꼴 전체를 싣습니다(약 2MB). 바꾸려면 `font: full`이나 `font: system`을 적거나 build에 `--font`를 붙입니다.
 - **장표는 `type: slide`를 꼭 적으세요.** 적지 않으면 `---`가 있어도 `auto`입니다.
 - 쪽 구분: `slide`·`a4`·`a4-landscape`에서는 본문의 `---` 줄이 쪽 구분입니다. `auto`(기본)에서는 `---`가 가로줄이고, 쪽을 나누려면 `<!-- page -->` 줄을 씁니다. 쪽을 나누지 않아도 됩니다.
 - 그림: `![설명](그림.png)`. 파일 안에 들어갑니다.

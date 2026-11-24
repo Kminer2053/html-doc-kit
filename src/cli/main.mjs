@@ -9,7 +9,7 @@ import {VERSION} from './core.mjs';
 
 const USAGE = `html-doc-kit ${VERSION}: HTML 문서에 뷰어와 편집기를 넣습니다
 
-  build <본문.md|본문.html> -o <결과.html> [--type slide|a4|a4-landscape|auto] [--title 제목]
+  build <본문.md|본문.html> -o <결과.html> [--type slide|a4|a4-landscape|auto] [--title 제목] [--font system|full]
   ensure <파일.html> [-o 결과.html]    어떤 HTML이든 완성 파일로 만듭니다(이미 완성이면 그대로). 마크다운은 같은 이름의 .html로 냅니다
   check <파일.html>                    완성 여부 판정. 0 완성, 1 미완성, 2 입력 문제
   extract <파일.html> [-o 본문.html]   완성 파일에서 본문만 꺼냅니다(기본 위치 .doc-kit/)
@@ -28,6 +28,7 @@ function parseArgs(argv) {
     if (a === '-o' || a === '--output') o.output = argv[++i];
     else if (a === '--type') o.type = argv[++i];
     else if (a === '--title') o.title = argv[++i];
+    else if (a === '--font') o.font = argv[++i];
     else if (a === '--minutes') o.minutes = Number(argv[++i]);
     else if (a === '--home') o.home = argv[++i];
     else if (a === '--agents') o.agents = argv[++i].split(',');

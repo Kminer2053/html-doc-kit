@@ -1,6 +1,6 @@
 /* 기본 모양. 문서에 자체 스타일이 없거나 마크다운으로 쓴 문서에 쓴다(덧붙인 스타일이 이긴다).
    참고: GitHub 마크다운(github-markdown-css), Tailwind prose, 한국어 조판(W3C klreq: 낱말 단위 줄바꿈, 넉넉한 줄 간격) */
-:where(#dk-document[data-dk-plain] .dk-page-inner){font:16px/1.75 DocKitFull,'Noto Sans KR','Noto Sans CJK KR','Apple SD Gothic Neo','Malgun Gothic',sans-serif;color:#1f2b37;padding:56px 64px;word-break:keep-all;overflow-wrap:break-word}
+:where(#dk-document[data-dk-plain] .dk-page-inner){font:16px/1.75 DocKitFull,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR','Noto Sans CJK KR',sans-serif;color:#1f2b37;padding:56px 64px;word-break:keep-all;overflow-wrap:break-word}
 :where(#dk-document[data-dk-plain] .dk-page[data-dk-size=slide] .dk-page-inner){font-size:28px;padding:72px 96px}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(*:first-child){margin-top:0}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(*:last-child){margin-bottom:0}
@@ -49,7 +49,7 @@
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-warning){--dk-a:#9a6700}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(.markdown-alert-caution){--dk-a:#cf222e}
 /* 코드: 한글은 고정폭 글꼴에 없어 본문 글꼴로 이어 쓴다(글자 사이가 벌어지지 않게) */
-:where(#dk-document[data-dk-plain] .dk-page-inner) :where(code,kbd,pre){font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,DocKitFull,'Noto Sans KR',monospace}
+:where(#dk-document[data-dk-plain] .dk-page-inner) :where(code,kbd,pre){font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,DocKitFull,'Apple SD Gothic Neo','Malgun Gothic','Noto Sans KR',monospace}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(code){font-size:.875em;background:#eef2f6;padding:.15em .4em;border-radius:4px}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre){margin:0 0 1.2em;padding:1em 1.2em;background:#f6f8fa;border:1px solid #e1e7ee;border-radius:6px;font-size:.875em;line-height:1.6;overflow:auto;word-break:normal;overflow-wrap:normal;break-inside:avoid}
 :where(#dk-document[data-dk-plain] .dk-page-inner) :where(pre code){background:none;padding:0;font-size:inherit;border-radius:0}

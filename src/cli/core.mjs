@@ -7,7 +7,7 @@ import markedAlert from 'marked-alert';
 import markedFootnote from 'marked-footnote';
 import {addClass, attr, bodyOf, byId, classes, delAttr, find, findAll, findOuter, hasAttr, headOf, htmlOf, inner, isEl, isScriptAnimation, isScriptAttr, parse, readHtml, remove, serialize, setAttr, textOf, walk} from './html.mjs';
 import {fixViewportUnits, scopeCss} from './css.mjs';
-import {BASE_CSS, FONT_CSS, KIT_CSS, KIT_JS, VERSION} from './assets.gen.mjs';
+import {BASE_CSS, FONT_CSS, FONT_LITE_CSS, KIT_CSS, KIT_JS, VERSION} from './assets.gen.mjs';
 
 export const SIZES = {
   slide: {w: 1920, h: 1080},
@@ -283,7 +283,7 @@ export function pagesFromHtml(source, baseDir, opts, warn) {
     }
   }
   // extract가 마크다운 출신 문서에 남기는 표식. 덧붙인 스타일이 있어도 기본 모양을 지킨다
-  return {pages: out, css, docTitle, ...(metaOf(head, 'doc-style') === 'plain' ? {plain: true} : {})};
+  return {pages: out, css, docTitle, ...(metaOf(head, 'doc-style') === 'plain' ? {plain: true} : {}), ...fontChoice(opts.font || metaOf(head, 'doc-font'))};
 }
 
 // 마크다운: 앞머리(--- title/type ---), 쪽 구분(--- 줄), 쪽 끝의 "Notes:" 이후는 메모
@@ -314,7 +314,14 @@ export function pagesFromMarkdown(source, baseDir, opts, warn) {
     parts.push({html: inner(bodyOf(tree)), kind, notes, key: '', fromSource: false});
   }
   // 마크다운은 기본 모양을 바탕으로 쓴다. 본문에 넣은 <style>은 그 위에 덧붙이는 조정으로 본다
-  return {pages: parts, css: cssAll, docTitle: opts.title || meta.title || '', plain: true};
+  // 글꼴: 쪽 길이가 자유로운 auto 문서는 싣지 않는다(PC 글꼴로 줄이 바뀌어도 넘치지 않는다). 쪽이 정해진 장표·A4는 한글 전체를 싣는다
+  return {pages: parts, css: cssAll, docTitle: opts.title || meta.title || '', plain: true, ...fontChoice(opts.font || meta.font || (kind === 'auto' ? 'system' : 'full'))};
+}
+
+// 글꼴 선택(--font, 앞머리 font:, <meta name="doc-font">). system은 글꼴을 싣지 않는 가벼운 형태, full은 한글 전체 내장
+export function fontChoice(v) {
+  const f = String(v || '').trim().toLowerCase();
+  return f === 'system' || f === 'full' ? {font: f} : {};
 }
 
 const pageSize = (p) => {
@@ -324,7 +331,8 @@ const pageSize = (p) => {
 };
 
 // plain: 기본 모양(base.css)을 쓸지. 정하지 않았으면 문서 스타일이 없을 때만 쓴다
-export function assemble({pages, css, docTitle, docId, rev, base, extraBook, plain: wantPlain}) {
+export function assemble({pages, css, docTitle, docId, rev, base, extraBook, plain: wantPlain, font}) {
+  const lite = font === 'system';
   const sizes = new Map();
   const bookPages = [];
   const sections = pages.map((p, i) => {
@@ -353,10 +361,10 @@ export function assemble({pages, css, docTitle, docId, rev, base, extraBook, pla
   const book = JSON.stringify({title, pages: bookPages, ...(extraBook || {})}).replace(/</g, '\\u003c');
   return `<!doctype html>
 <html lang="ko" data-doc-kit="${VERSION}" data-doc-id="${esc(docId)}" data-doc-rev="${rev}">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><meta name="doc-kit-version" content="${VERSION}"><style id="dk-page-sizes">${pageCss}</style><style id="dk-doc-style">${css}</style></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title><meta name="doc-kit-version" content="${VERSION}">${lite ? '<meta name="doc-font" content="system">' : ''}<style id="dk-page-sizes">${pageCss}</style><style id="dk-doc-style">${css}</style></head>
 <body><div id="dk-workspace"><div id="dk-viewport"><main id="dk-document"${plain ? ' data-dk-plain=""' : ''}>${sections.join('')}</main></div></div>
 <script id="dk-book" type="application/json">${book}</script><script id="dk-base" type="application/json">${base || ''}</script>
-<style id="dk-base-style">${BASE_CSS}</style><style id="dk-kit-style">${KIT_CSS}</style><style id="dk-font-style">${FONT_CSS}</style><script id="dk-kit-code">${KIT_JS}</script>
+<style id="dk-base-style">${BASE_CSS}</style><style id="dk-kit-style">${KIT_CSS}</style><style id="dk-font-style">${lite ? FONT_LITE_CSS : FONT_CSS}</style><script id="dk-kit-code">${KIT_JS}</script>
 </body></html>
 `;
 }
@@ -401,6 +409,7 @@ export function readKit(source, baseDir, opts, warn) {
   } catch {
     warn('메모 자료가 깨져 있어 새로 만듭니다');
   }
+  const headMeta = metaOf(headOf(tree), 'doc-font');
   const styleEl = byId(tree, 'dk-doc-style');
   let css = inlineCssUrls(styleEl ? styleEl.childNodes.map((c) => c.value || '').join('') : '', baseDir, warn);
   const baseEl = byId(tree, 'dk-base');
@@ -462,6 +471,7 @@ export function readKit(source, baseDir, opts, warn) {
     css,
     docTitle: book.title || '',
     ...(docEl && hasAttr(docEl, 'data-dk-plain') ? {plain: true} : {}),
+    ...fontChoice(opts.font || (headMeta === 'system' ? 'system' : '')),
     kit: {version: root ? attr(root, 'data-doc-kit') : null, id: root ? attr(root, 'data-doc-id') : null, rev: Number(root ? attr(root, 'data-doc-rev') : 0) || 0, base, extraBook: book.minutes ? {minutes: book.minutes} : undefined},
   };
 }
@@ -479,6 +489,7 @@ export function render(src, opts = {}) {
     base: '',
     extraBook: {...(src.kit?.extraBook || {}), ...(opts.minutes ? {minutes: opts.minutes} : {})},
     plain: opts.dropCss ? true : src.plain,
+    font: src.font,
   });
 }
 
@@ -498,7 +509,7 @@ export function extractBody(source, warn, baseDir = '.') {
     const notes = p.notes ? `\n<aside data-notes-block="">${esc(p.notes)}</aside>` : '';
     return `<section ${a.join(' ')}>\n${p.html}${notes}\n</section>`;
   });
-  const plainMeta = src.plain ? '\n<meta name="doc-style" content="plain">' : '';
+  const plainMeta = (src.plain ? '\n<meta name="doc-style" content="plain">' : '') + (src.font === 'system' ? '\n<meta name="doc-font" content="system">' : '');
   const text = `<!-- html-doc-kit 본문 파일. 고친 뒤 apply로 되돌립니다. dk-asset:번호는 그림 자리이니 그대로 두세요 -->\n<title>${esc(src.docTitle)}</title>${plainMeta}\n<style>${src.css}</style>\n${bits.join('\n')}\n`;
   const assets = [];
   const seen = new Map();
